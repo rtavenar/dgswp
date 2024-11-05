@@ -4,7 +4,7 @@ import torch
 from torch.distributions.gumbel import Gumbel
 from torch.distributions.normal import Normal
 
-from partial import PartialOT1d
+from partial import partial_ot_1d
 
 _GUMBEL = 'gumbel'
 _NORMAL = 'normal'
@@ -49,9 +49,8 @@ def project_in_1d(x, y, w):
     return proj_x, proj_y
 
 def compute_cost(x, y, w, max_iter_partial):
-    partial_pb = PartialOT1d(max_iter_partial)
     proj_x, proj_y = project_in_1d(x, y, w)
-    ind_x, ind_y, marginal_costs = partial_pb.fit(proj_x, proj_y)
+    ind_x, ind_y, marginal_costs = partial_ot_1d(proj_x, proj_y, max_iter=max_iter_partial, p=2)
 
     sorted_ind_x = np.argsort(proj_x[ind_x])
     sorted_ind_y = np.argsort(proj_y[ind_y])
@@ -111,7 +110,6 @@ class PerturbedPartialSWGG:
                  perturbation_n_samples=1000, perturbation_sigma=1., perturbation_noise="normal", device=None) -> None:
         self.max_iter_gradient = max_iter_gradient
         self.max_iter_partial = max_iter_partial
-        self.partial_problem = PartialOT1d(self.max_iter_partial)
         if device is not None:
             self.device = device
         else:
@@ -173,7 +171,7 @@ class PerturbedPartialSWGG:
                 print()
         
         proj_x, proj_y = self.project_in_1d(x, y, torch.Tensor(best_w))
-        ind_x, ind_y, _ = self.partial_problem.fit(proj_x, proj_y)
+        ind_x, ind_y, _ = partial_ot_1d(proj_x, proj_y, max_iter=self.max_iter_partial, p=2)
         
         bool_indices_x = np.array([(i in ind_x) for i in range(n)], dtype=bool)
         bool_indices_y = np.array([(i in ind_y) for i in range(n)], dtype=bool)
