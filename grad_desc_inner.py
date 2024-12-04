@@ -18,14 +18,14 @@ def grad_G_eps_Stein(x, y, w, epsilon, n_samples):
 
 n = 30
 n_iter_grad = 30
-learning_rate = 1e-2
+learning_rate = 1e-3
 epsilon = .1
 d = 20
 
 np.random.seed(0)
 
 x = np.random.randn(n, d)
-y = np.random.randn(n, d)
+y = np.random.randn(n, d) + np.ones((1, d)) / d
 
 w0 = np.random.randn(d, )
 w0 /= np.linalg.norm(w0)
@@ -38,6 +38,7 @@ for n_samples in [10, 100, 1000]:
         G_vals.append(G(x, y, w[-1]))
         g = grad_G_eps_Stein(x, y, w[-1], epsilon, n_samples)
         w.append(w[-1] - learning_rate * g)
+    print(G_vals)
     plt.plot(G_vals, label=f"n_samples={n_samples}")
 plt.legend()
 plt.title(f"Descente de gradient en dimension {d}")

@@ -34,7 +34,7 @@ d = 3
 np.random.seed(0)
 
 x = np.random.randn(n, d)
-y = np.random.randn(n, d)
+y = np.random.randn(n, d) + (2 * np.ones((1, d)))
 
 alphas, betas = np.mgrid[-np.pi:np.pi:.1, -np.pi:np.pi:.1]
 alpha_betas = np.vstack((alphas.flatten(), betas.flatten())).T
@@ -74,20 +74,20 @@ ax3.set_title("Norm of smoothed $\\nabla_{(\\alpha,\\beta)}G_\\epsilon$")
 ax4 = fig.add_subplot(gs[:, 2:])
 ax4.imshow(Gs.reshape(alphas.shape), cmap=cm.coolwarm, extent=[-np.pi, np.pi, -np.pi, np.pi])
 ax4.contour(np.linalg.norm(grad_Gs_eps_Stein, axis=-1).reshape(alphas.shape), 
-            levels=[0.5], colors="white", extent=[-np.pi, np.pi, -np.pi, np.pi])
+            levels=[1.], colors="white", extent=[-np.pi, np.pi, -np.pi, np.pi])
 
-learning_rate = .1
-for ab_0 in np.random.randn(5, 2):
+learning_rate = .01
+for ab_0 in (np.random.rand(10, 2) - .5) * 1.5 * np.pi:
     ab = [ab_0]
     G_vals = []
-    for _ in range(15):
+    for _ in range(30):
         G_vals.append(G(x, y, ab[-1]))
         g = grad_G_eps_Stein(x, y, ab[-1], epsilon, n_samples)
         ab.append(ab[-1] - learning_rate * g)
     ax4.plot([a for a, b in ab], [b for a, b in ab], marker="o", color="orange")
     ax4.plot([a for a, b in ab[-1:]], [b for a, b in ab[-1:]], marker="o", color="black")
 
-ax4.set_title(".5-level of $\\|\\nabla_{(\\alpha,\\beta)}G_\\epsilon\\|$ overlayed on $G$")
+ax4.set_title("1.-level of $\\|\\nabla_{(\\alpha,\\beta)}G_\\epsilon\\|$ overlayed on $G$")
 
 plt.tight_layout()
 plt.show()
