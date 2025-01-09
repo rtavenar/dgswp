@@ -26,19 +26,19 @@ def sample_noise_with_gradients(n_samples, shape):
 
     return all_samples, gradients
 
-def F(x, y, theta):
+def F(x, y, theta, p):
     pos_x_1d = np.argsort(theta @ x.T)
     pos_y_1d = np.argsort(theta @ y.T)
-    return torch.mean(torch.sum((x[pos_x_1d] - y[pos_y_1d]) ** 2, dim=-1), dim=0)
+    return torch.mean(torch.sum(torch.abs(x[pos_x_1d] - y[pos_y_1d]) ** p, dim=-1), dim=0)
 
 
-def F_batch(thetas, x, y):
-    perturbed_costs = [F(x, y, theta) for theta in thetas]
+def F_batch(thetas, x, y, p):
+    perturbed_costs = [F(x, y, theta, p) for theta in thetas]
     return torch.tensor(perturbed_costs)
 
 class F_epsilon(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, theta, x, y, n_samples, epsilon, device):
+    def forward(ctx, theta, x, y, p, n_samples, epsilon, device):
         """
         In the forward pass we receive a Tensor containing the input and return
         a Tensor containing the output. ctx is a context object that can be used
@@ -53,7 +53,7 @@ class F_epsilon(torch.autograd.Function):
 
         # [...]
         # perturbed_output is [N+1, ]
-        perturbed_output = F_batch(perturbed_input, x, y)
+        perturbed_output = F_batch(perturbed_input, x, y, p)
 
         ctx.save_for_backward(perturbed_output, noise_gradient, torch.tensor(epsilon))
         return torch.mean(perturbed_output, dim=0)
@@ -68,7 +68,7 @@ class F_epsilon(torch.autograd.Function):
         perturbed_output, noise_gradient, epsilon = ctx.saved_tensors
         F0 = perturbed_output[0]
         grad_theta = grad_output * (perturbed_output[1:] - F0).unsqueeze(1) * noise_gradient[1:] / epsilon
-        return torch.mean(grad_theta, dim=0), None, None, None, None, None
+        return torch.mean(grad_theta, dim=0), None, None, None, None, None, None
 
 
 
@@ -99,9 +99,10 @@ if __name__ == "__main__":
     epsilon = .1
     n_samples = 10
     d = 3
+    p = 1 # W_1
     x, y = draw_samples(n, d)
     learning_rate = 0.005
-    n_iter = 100
+    n_iter = 1000
     n_reps = 3
 
     losses = {}
@@ -111,7 +112,7 @@ if __name__ == "__main__":
         for i in range(n_iter):
             with torch.no_grad():
                 thetas[-1] /= torch.norm(thetas[-1])
-            loss = F_epsilon.apply(thetas[-1], x, y, n_samples, epsilon, "cpu")
+            loss = F_epsilon.apply(thetas[-1], x, y, p, n_samples, epsilon, "cpu")
             loss.backward()
             with torch.no_grad():
                 losses[id_rep].append(loss.item())
