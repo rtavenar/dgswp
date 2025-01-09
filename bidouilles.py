@@ -54,13 +54,13 @@ def grad_G_eps_Stein(x, y, theta, epsilon, n_samples):
 
 
 n = 3
-# n_samples = 100
+n_samples = 100
 epsilon = .1
 d = 2
 
 np.random.seed(0)
 
-x = np.random.randn(n, d)
+x = np.random.randn(n, d)+0.5
 y = np.random.randn(n, d)
 
 thetas = np.linspace(-np.pi, np.pi, num=200)
@@ -82,6 +82,14 @@ ax1.plot(thetas, Gs, label="$G(\\theta)$")
 ax1.plot(thetas, Gs_eps, label="$G_\\varepsilon(\\theta)$")
 ax1.set_xlabel("$\\theta$")
 ax1.legend(loc="upper right")
+
+theta_init = 0
+lr = 1e-2
+for _ in range(20):
+    g = grad_G_eps_Stein(x, y, theta_init, epsilon, n_samples)
+    theta_init = theta_init - lr * g
+    ax1.scatter(theta_init, G(x, y, theta_init), c = "C2")
+
 for i, n_samples in enumerate([10, 100, 1000]):
   ax2 = fig.add_subplot(gs[i + 1, :])
   ax2.axhline(y=0, color="k", linestyle="dashed")
@@ -92,5 +100,6 @@ for i, n_samples in enumerate([10, 100, 1000]):
 # ax2.plot(thetas, grad_Gs, label="$\\nabla_{\\theta} G$")
   ax2.set_xlabel("$\\theta$")
   ax2.legend(loc=(0., 1.1))
+
 plt.tight_layout()
 plt.show()
