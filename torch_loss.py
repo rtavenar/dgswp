@@ -108,15 +108,14 @@ if __name__ == "__main__":
     for id_rep in range(n_reps):
         losses[id_rep] = []
         thetas = [torch.randn(d, requires_grad=True)]
-        with torch.no_grad():
-            thetas[0] /= torch.norm(thetas[0])
         for i in range(n_iter):
+            with torch.no_grad():
+                thetas[-1] /= torch.norm(thetas[-1])
             loss = F_epsilon.apply(thetas[-1], x, y, n_samples, epsilon, "cpu")
             loss.backward()
             with torch.no_grad():
                 losses[id_rep].append(loss.item())
                 theta_t = thetas[-1] - learning_rate * thetas[-1].grad
-                theta_t /= torch.norm(theta_t)
                 theta_t.requires_grad_()
                 thetas.append(theta_t)
     

@@ -25,8 +25,20 @@ def grad_G_eps_Stein(x, y, alpha_beta, epsilon, n_samples):
     return np.mean([(G(x, y, alpha_beta + epsilon * z) - G0) * z / epsilon for z in np.random.randn(n_samples, 2)],
                    axis=0)
 
+def grad_G_eps_Stein_smoothed(x, y, alpha_beta, epsilon, n_samples, gaussian_std=1.):
+    alpha, beta = alpha_beta
+    avg_g = np.zeros(alpha_beta.shape)
+    sum_weights = 0.
+    for alpha_smooth in [alpha - gaussian_std, alpha, alpha + gaussian_std]:
+        for beta_smooth in [beta - gaussian_std, beta, beta + gaussian_std]:
+            alpha_beta_smooth = np.array([alpha_smooth, beta_smooth])
+            g_smooth = grad_G_eps_Stein(x, y, alpha_beta_smooth, epsilon, n_samples)
+            weight = np.exp(- np.linalg.norm(alpha_beta - alpha_beta_smooth, ord=2) ** 2 / (2 * gaussian_std ** 2))
+            avg_g += weight * g_smooth
+            sum_weights += weight
+    return avg_g / sum_weights
 
-n = 3
+n = 30
 n_samples = 100
 epsilon = .1
 d = 3
@@ -64,28 +76,42 @@ ax1.set_title("$G_\\epsilon$")
 ax2 = fig.add_subplot(gs[1, 0], projection="3d")
 ax2.plot_surface(alphas, betas, np.linalg.norm(grad_Gs_eps_Stein, axis=-1).reshape(alphas.shape), cmap=cm.coolwarm, linewidth=0, antialiased=False)
 ax2.set_title("$\\|\\nabla_{(\\alpha,\\beta)}G_\\epsilon\\|$")
-ax3 = fig.add_subplot(gs[1, 1], projection="3d")
-ax3.plot_surface(alphas, betas, 
-                 np.linalg.norm(
-                     gaussian_filter(grad_Gs_eps_Stein.reshape(alphas.shape + (2, )), sigma=2., axes=(0, 1)), 
-                     axis=-1), 
-                 cmap=cm.coolwarm, linewidth=0, antialiased=False)
-ax3.set_title("Norm of smoothed $\\nabla_{(\\alpha,\\beta)}G_\\epsilon$")
+# ax3 = fig.add_subplot(gs[1, 1], projection="3d")
+# ax3.plot_surface(alphas, betas, 
+#                  np.linalg.norm(
+#                      gaussian_filter(grad_Gs_eps_Stein.reshape(alphas.shape + (2, )), sigma=2., axes=(0, 1)), 
+#                      axis=-1), 
+#                  cmap=cm.coolwarm, linewidth=0, antialiased=False)
+# ax3.set_title("Norm of smoothed $\\nabla_{(\\alpha,\\beta)}G_\\epsilon$")
 ax4 = fig.add_subplot(gs[:, 2:])
 ax4.imshow(Gs.reshape(alphas.shape), cmap=cm.coolwarm, extent=[-np.pi, np.pi, -np.pi, np.pi])
 ax4.contour(np.linalg.norm(grad_Gs_eps_Stein, axis=-1).reshape(alphas.shape), 
-            levels=[1.], colors="white", extent=[-np.pi, np.pi, -np.pi, np.pi])
+            levels=[1.], colors="white", extent=[alpha_betas[:, 0].min(), alpha_betas[:, 0].max(), 
+                                                 alpha_betas[:, 1].min(), alpha_betas[:, 1].max(), ])
+# ax2 = fig.add_subplot(gs[1, 0])
+# ax3 = fig.add_subplot(gs[1, 1])
 
-learning_rate = .01
-for ab_0 in (np.random.rand(10, 2) - .5) * 1.5 * np.pi:
-    ab = [ab_0]
-    G_vals = []
-    for _ in range(30):
-        G_vals.append(G(x, y, ab[-1]))
-        g = grad_G_eps_Stein(x, y, ab[-1], epsilon, n_samples)
-        ab.append(ab[-1] - learning_rate * g)
-    ax4.plot([a for a, b in ab], [b for a, b in ab], marker="o", color="orange")
-    ax4.plot([a for a, b in ab[-1:]], [b for a, b in ab[-1:]], marker="o", color="black")
+# learning_rate = 1e-4
+# for ab_0 in (np.random.rand(10, 2) - .5) * 1.5 * np.pi:
+#     ab = [ab_0]
+#     G_vals = []
+#     for _ in range(100):
+#         G_vals.append(G(x, y, ab[-1]))
+#         g = grad_G_eps_Stein(x, y, ab[-1], epsilon, n_samples)
+#         ab.append(ab[-1] - learning_rate * g)
+#     ax4.plot([a for a, b in ab], [b for a, b in ab], marker="o", color="orange")
+#     ax4.plot([a for a, b in ab[-1:]], [b for a, b in ab[-1:]], marker="o", color="black")
+#     ax3.plot(G_vals)
+
+    # ab = [ab_0]
+    # G_vals = []
+    # for _ in range(30):
+    #     G_vals.append(G(x, y, ab[-1]))
+    #     g = grad_G_eps_Stein_smoothed(x, y, ab[-1], epsilon, n_samples)
+    #     ab.append(ab[-1] - learning_rate * g)
+    # ax4.plot([a for a, b in ab], [b for a, b in ab], marker="o", color="green")
+    # ax4.plot([a for a, b in ab[-1:]], [b for a, b in ab[-1:]], marker="o", color="black")
+    # ax3.plot(G_vals)
 
 ax4.set_title("1.-level of $\\|\\nabla_{(\\alpha,\\beta)}G_\\epsilon\\|$ overlayed on $G$")
 
