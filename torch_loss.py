@@ -122,4 +122,6 @@ if __name__ == "__main__":
     
     for l in losses.values():
         plt.plot(l, color='b')
+    plt.legend(["$F_{\\varepsilon}$"])
+    plt.title("Et tout ça en torch")
     plt.show()
