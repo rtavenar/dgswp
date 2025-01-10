@@ -11,11 +11,13 @@ def sample_noise_with_gradients(n_samples, shape):
     shape: torch.tensor<int>, the tensor shape of each sample.
 
     Returns:
-    A tuple Tensor<float>[[n_samples, *shape]], Tensor<float>[[n_samples, *shape]] 
+    A tuple Tensor<float>[[n_samples+1, *shape]], Tensor<float>[[n_samples+1, *shape]] 
     that corresponds to the
     sampled noise and the gradient of log the underlying probability
     distribution function. In practice, for the N(0,1) distribution, the
     gradient is equal to the noise itself.
+    The first element in this tensor is always the zero element that can later be used
+    for variance reduction.
     """
     actual_shape = [n_samples] + list(shape)
     sampler = Normal(0.0, 1.0)
@@ -26,19 +28,20 @@ def sample_noise_with_gradients(n_samples, shape):
 
     return all_samples, gradients
 
-def F(x, y, theta, p):
-    pos_x_1d = np.argsort(theta @ x.T)
-    pos_y_1d = np.argsort(theta @ y.T)
+def F(x, y, theta, p=2):
+    pos_x_1d = torch.argsort(theta @ x.T)
+    pos_y_1d = torch.argsort(theta @ y.T)
     return torch.mean(torch.sum(torch.abs(x[pos_x_1d] - y[pos_y_1d]) ** p, dim=-1), dim=0)
 
 
-def F_batch(thetas, x, y, p):
-    perturbed_costs = [F(x, y, theta, p) for theta in thetas]
-    return torch.tensor(perturbed_costs)
+def F_batch(thetas, x, y, fun=None):
+    if fun is None:
+        fun = lambda x, y, theta: F(x, y, theta)
+    return torch.tensor([fun(x, y, theta) for theta in thetas])
 
 class F_epsilon(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, theta, x, y, p, n_samples, epsilon, device):
+    def forward(ctx, theta, x, y, fun, n_samples, epsilon, device):
         """
         In the forward pass we receive a Tensor containing the input and return
         a Tensor containing the output. ctx is a context object that can be used
@@ -53,7 +56,7 @@ class F_epsilon(torch.autograd.Function):
 
         # [...]
         # perturbed_output is [N+1, ]
-        perturbed_output = F_batch(perturbed_input, x, y, p)
+        perturbed_output = F_batch(perturbed_input, x, y, fun)
 
         ctx.save_for_backward(perturbed_output, noise_gradient, torch.tensor(epsilon))
         return torch.mean(perturbed_output, dim=0)
@@ -70,8 +73,8 @@ class F_epsilon(torch.autograd.Function):
         grad_theta = grad_output * (perturbed_output[1:] - F0).unsqueeze(1) * noise_gradient[1:] / epsilon
         return torch.mean(grad_theta, dim=0), None, None, None, None, None, None
 
-def F_eps(theta, x, y, p, n_samples, epsilon, device="cpu"):
-    return F_epsilon.apply(theta, x, y, p, n_samples, epsilon, device)
+def F_eps(theta, x, y, fun, n_samples, epsilon, device="cpu"):
+    return F_epsilon.apply(theta, x, y, fun, n_samples, epsilon, device)
 
 
 if __name__ == "__main__":
@@ -114,7 +117,8 @@ if __name__ == "__main__":
         for i in range(n_iter):
             with torch.no_grad():
                 thetas[-1] /= torch.norm(thetas[-1])
-            loss = F_eps(thetas[-1], x, y, p, n_samples, epsilon)
+            loss = F_eps(thetas[-1], x, y, 
+                         fun=F, n_samples=n_samples, epsilon=epsilon)
             loss.backward()
             with torch.no_grad():
                 losses[id_rep].append(loss.item())
