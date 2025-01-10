@@ -70,6 +70,8 @@ class F_epsilon(torch.autograd.Function):
         grad_theta = grad_output * (perturbed_output[1:] - F0).unsqueeze(1) * noise_gradient[1:] / epsilon
         return torch.mean(grad_theta, dim=0), None, None, None, None, None, None
 
+def F_eps(theta, x, y, p, n_samples, epsilon, device="cpu"):
+    return F_epsilon.apply(theta, x, y, p, n_samples, epsilon, device)
 
 
 if __name__ == "__main__":
@@ -112,7 +114,7 @@ if __name__ == "__main__":
         for i in range(n_iter):
             with torch.no_grad():
                 thetas[-1] /= torch.norm(thetas[-1])
-            loss = F_epsilon.apply(thetas[-1], x, y, p, n_samples, epsilon, "cpu")
+            loss = F_eps(thetas[-1], x, y, p, n_samples, epsilon)
             loss.backward()
             with torch.no_grad():
                 losses[id_rep].append(loss.item())
