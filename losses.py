@@ -68,7 +68,12 @@ class F_epsilon(torch.autograd.Function):
         perturbed_output, noise_gradient, epsilon = ctx.saved_tensors
 
         F0 = perturbed_output[0]
-        grad_theta = grad_output * (perturbed_output[1:] - F0).unsqueeze(1) * noise_gradient[1:] / epsilon
+        F_minus_F0 = grad_output * (perturbed_output[1:] - F0)
+        F_minus_F0_reshaped = F_minus_F0
+        for _ in range(len(noise_gradient.shape) - 1):
+            F_minus_F0_reshaped = F_minus_F0_reshaped.unsqueeze(1)
+
+        grad_theta = F_minus_F0_reshaped * noise_gradient[1:] / epsilon
         
         return torch.mean(grad_theta, dim=0), None, None, None, None, None, None
 
