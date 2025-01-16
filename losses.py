@@ -1,5 +1,5 @@
 import numpy as np
-
+import copy
 import torch
 from torch.distributions.normal import Normal
 
@@ -37,7 +37,7 @@ def F(x, y, theta, p=2):
 def F_batch(thetas, x, y, fun=None):
     if fun is None:
         fun = lambda x, y, theta: F(x, y, theta)
-    return torch.tensor([fun(x, y, theta) for theta in thetas])
+    return torch.tensor([fun(x, y, theta) for theta in thetas], requires_grad=True)
 
 class F_epsilon(torch.autograd.Function):
     @staticmethod
@@ -53,10 +53,7 @@ class F_epsilon(torch.autograd.Function):
         additive_noise = additive_noise.to(device)
         noise_gradient = noise_gradient.to(device)  # [N+1, D]
         perturbed_input = theta + epsilon * additive_noise  # [N+1, D]
-
-        # [...]
-        # perturbed_output is [N+1, ]
-        perturbed_output = F_batch(perturbed_input, x, y, fun)
+        perturbed_output = F_batch(perturbed_input, x, y, fun)  # [N+1, ]
 
         ctx.save_for_backward(perturbed_output, noise_gradient, torch.tensor(epsilon))
         return torch.mean(perturbed_output, dim=0)
@@ -69,12 +66,79 @@ class F_epsilon(torch.autograd.Function):
         with respect to the input.
         """
         perturbed_output, noise_gradient, epsilon = ctx.saved_tensors
+
         F0 = perturbed_output[0]
         grad_theta = grad_output * (perturbed_output[1:] - F0).unsqueeze(1) * noise_gradient[1:] / epsilon
+        
         return torch.mean(grad_theta, dim=0), None, None, None, None, None, None
 
+class F_epsilon_module(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, module, x, y, fun, n_samples, epsilon, device):
+        """
+        In the forward pass we receive a Tensor containing the input and return
+        a Tensor containing the output. ctx is a context object that can be used
+        to stash information for backward computation. You can cache arbitrary
+        objects for use in the backward pass using the ctx.save_for_backward method.
+        """
+        perturbed_modules = [copy.deepcopy(module) for _ in range(n_samples + 1)]  # list of N+1 models
+        noise_gradients = []  # list of len(module.parameters()) noise gradients
+        module_parameters = list(module.parameters())
+        for i_param in range(len(module_parameters)):
+            input_shape = module_parameters[i_param].shape  # [D, ] or multidim, whatever
+            additive_noise, noise_gradient = sample_noise_with_gradients(n_samples, input_shape)
+            additive_noise = additive_noise.to(device)
+            noise_gradient = noise_gradient.to(device)  # [N+1, D]
+            for idx_m, m in enumerate(perturbed_modules):
+                list(m.parameters())[i_param] += epsilon * additive_noise[idx_m]
+            noise_gradients.append(noise_gradient)
+        perturbed_output = F_batch(perturbed_modules, x, y, fun)  # [N+1, ]
+
+        ctx.save_for_backward(perturbed_output, *noise_gradients, torch.tensor(epsilon))
+        ctx.module = module
+        return torch.mean(perturbed_output, dim=0)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        """
+        In the backward pass we receive a Tensor containing the gradient of the loss
+        with respect to the output, and we need to compute the gradient of the loss
+        with respect to the input.
+        """
+        tensors = ctx.saved_tensors
+        perturbed_output = tensors[0]
+        noise_gradients = tensors[1:-1]
+        epsilon = tensors[-1]
+        module = ctx.module
+
+        F0 = perturbed_output[0]
+        F_minus_F0 = grad_output * (perturbed_output[1:] - F0)
+        module_parameters = list(module.parameters())
+        for i_param in range(len(module_parameters)):
+            noise_gradient = noise_gradients[i_param]
+            F_minus_F0_reshaped = F_minus_F0
+            for _ in range(len(noise_gradient.shape) - 1):
+                F_minus_F0_reshaped = F_minus_F0_reshaped.unsqueeze(1)
+            grad_theta = F_minus_F0_reshaped * noise_gradient[1:] / epsilon
+            if module_parameters[i_param].grad is None:
+                module_parameters[i_param].grad = torch.mean(grad_theta, dim=0)
+            else:
+                module_parameters[i_param].grad += torch.mean(grad_theta, dim=0)
+        
+        return None, None, None, None, None, None, None
+        
+
 def F_eps(theta, x, y, fun, n_samples, epsilon, device="cpu"):
-    return F_epsilon.apply(theta, x, y, fun, n_samples, epsilon, device)
+    if isinstance(theta, torch.nn.Module):
+        # Ugly hack, not sure why we need that :(
+        requires_grad = x.requires_grad
+        x.requires_grad_()
+        ret = F_epsilon_module.apply(theta, x, y, fun, n_samples, epsilon, device)
+        if not requires_grad:
+            x.requires_grad_(False)
+        return ret
+    else:
+        return F_epsilon.apply(theta, x, y, fun, n_samples, epsilon, device)
 
 
 if __name__ == "__main__":
