@@ -134,8 +134,7 @@ def F_eps(theta, x, y, fun, n_samples, epsilon, device="cpu"):
         requires_grad = x.requires_grad
         x.requires_grad_()
         ret = F_epsilon_module.apply(theta, x, y, fun, n_samples, epsilon, device)
-        if not requires_grad:
-            x.requires_grad_(False)
+        x.requires_grad_(requires_grad)
         return ret
     else:
         return F_epsilon.apply(theta, x, y, fun, n_samples, epsilon, device)
