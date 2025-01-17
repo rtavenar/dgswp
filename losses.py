@@ -134,6 +134,30 @@ class F_epsilon_module(torch.autograd.Function):
         
 
 def F_eps(theta, x, y, fun, n_samples, epsilon, device="cpu"):
+    """
+    This is the main function to be used for $F_\varepsilon$ computation.
+    
+    Arguments
+    ---------
+
+    theta: torch.tensor with requires_grad=True or torch.nn.Module
+        Parameter(s) to be optimized
+
+    x, y: torch.tensor s
+        Input distributions in full dimension
+    
+    fun: function that takes x, y, theta as input
+        Our $F$ function (operating on a single theta, be it a tensor of parameters or a module)
+
+    n_samples: int
+        Number of samples to be drawn for the Stein lemma's approximation of the gradient
+    
+    epsilon: float
+        Standard deviation for the normal law to be used in the Stein lemma's approximation of the gradient
+    
+    device: str, default "cpu"
+        Device to run torch operations on
+    """
     if isinstance(theta, torch.nn.Module):
         # Ugly hack, not sure why we need that :(
         requires_grad = x.requires_grad
