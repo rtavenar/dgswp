@@ -1,11 +1,9 @@
+import time
 import torch
 from torch import nn
 import numpy as np
-import sys
-import re
 import matplotlib.pyplot as plt
 
-from datasets import data_gen_torch
 from gradient_flows import (GeneralizedSWGGGradientFlow, 
                             SlicedWassersteinGradientFlow, 
                             UnOptimizedSWGGGradientFlow,
@@ -27,35 +25,11 @@ class SingleHiddenLayerNet(nn.Module):
         x = self.fc2(x)
         return x
 
-class SingleLayerInjectiveNet(nn.Module):
-    def __init__(self, input_size, hidden_size):
-        super(SingleHiddenLayerNet, self).__init__()
-        self.fc1 = nn.Linear(input_size, hidden_size)
-        self.relu = nn.ReLU()
-
-        # He init.
-        nn.init.kaiming_uniform_(self.fc1.weight, nonlinearity='relu')
-
-    def forward(self, x):
-        h = self.relu(self.fc1(x))
-        h = torch.cat((x, h), dim=-1)
-        return h
-
-n = 50
+n_iter = 100
+learning_rate_flow = .01
+n_directions = 10
 d = 2
 
-n_iter = 2000
-learning_rate_flow = .01
-n_directions = 20
-
-n_repeat = 10
-if len(sys.argv) > 1 and sys.argv[1] in ["swiss_roll", "circle", "gaussian", "two_moons"]:
-    dataset_name = sys.argv[1]
-elif len(sys.argv) > 1 and re.match(r'gaussian_\d+d', sys.argv[1]):
-    dataset_name = "gaussian"
-    d = int(re.search(r'\d+', sys.argv[1]).group())
-else:
-    dataset_name = "swiss_roll"
 models = {
     "SW": SlicedWassersteinGradientFlow(learning_rate_flow=learning_rate_flow,
                                           n_iter_flow=n_iter,
@@ -76,35 +50,33 @@ models = {
                                           model=SingleHiddenLayerNet(input_size=d, hidden_size=256, output_size=1),
                                           n_iter_inner=n_directions),
 }
-losses_wasserstein = {
-    name: np.zeros((n_repeat, n_iter)) for name in models.keys()
-}
 
-for i_repeat in range(n_repeat):
-    source, target = data_gen_torch(n_samples_per_distrib=n, d=d,
-                                    name=dataset_name, random_state=i_repeat)
-    torch.manual_seed(0)
-    for name, model in models.items():
-        losses_wasserstein[name][i_repeat] = model.fit(source=source, target=target)[-1]
+n_values = [10, 50, 100, 500, 1000]
+n_repeat = 5
 
-plt.figure()
+timings = {key: [] for key in models.keys()}
+
+torch.manual_seed(0)
+for n in n_values:
+    model_timings = {key: [] for key in models.keys()}
+    for _ in range(n_repeat):
+        source = torch.rand(n, d)
+        target = torch.rand(n, d)
+        for name, model in models.items():
+            start_time = time.time()
+            model.fit(source, target)
+            end_time = time.time()
+
+            model_timings[name].append(end_time - start_time)
+
+    for name in models.keys():
+        timings[name].append(np.mean(model_timings[name]))
+
+plt.figure(figsize=(10, 6))
 for name in models.keys():
-    median_loss = np.median(losses_wasserstein[name], axis=0)
-    percentile_10 = np.percentile(losses_wasserstein[name], 10, axis=0)
-    percentile_90 = np.percentile(losses_wasserstein[name], 90, axis=0)
-
-    p = plt.plot(np.arange(1, n_iter + 1),
-                np.log10(median_loss),
-                label=name)
-    color = p[0].get_color()
-    plt.fill_between(np.arange(1, n_iter + 1),
-                    np.log10(percentile_10),
-                    np.log10(percentile_90),
-                    alpha=.1,
-                    color=color)
+    plt.loglog(n_values, timings[name], label=name)
+plt.xlabel('$n$')
+plt.ylabel('Running time (s)')
 plt.legend()
-plt.ylabel("$\log_{10}(W_2)$")
-plt.xlabel("Iterations")
-plt.xlim(1, n_iter)
-plt.title(sys.argv[1].replace("_", " ").capitalize())
-plt.savefig(f"gf_{sys.argv[1]}.pdf")
+plt.grid()
+plt.savefig("timings_gf_n.pdf")
