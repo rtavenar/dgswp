@@ -9,7 +9,8 @@ from datasets import data_gen_torch
 from gradient_flows import (GeneralizedSWGGGradientFlow, 
                             SlicedWassersteinGradientFlow, 
                             UnOptimizedSWGGGradientFlow,
-                            SWGGGradientFlow)
+                            SWGGGradientFlow,
+                            AugmentedSlicedWassersteinGradientFlow)
 
 class SingleHiddenLayerNet(nn.Module):
     def __init__(self, input_size, hidden_size, output_size):
@@ -29,7 +30,7 @@ class SingleHiddenLayerNet(nn.Module):
 
 class SingleLayerInjectiveNet(nn.Module):
     def __init__(self, input_size, hidden_size):
-        super(SingleHiddenLayerNet, self).__init__()
+        super(SingleLayerInjectiveNet, self).__init__()
         self.fc1 = nn.Linear(input_size, hidden_size)
         self.relu = nn.ReLU()
 
@@ -67,6 +68,13 @@ models = {
                                           n_iter_flow=n_iter,
                                           n_iter_inner=n_directions,
                                           learning_rate_inner=.01),
+    "ASWD": AugmentedSlicedWassersteinGradientFlow(learning_rate_flow=.002,
+                                          n_iter_flow=n_iter,
+                                          model=SingleLayerInjectiveNet(input_size=d, hidden_size=256),
+                                          n_iter_inner=10,
+                                          n_directions=n_directions,
+                                          lambda_="auto",
+                                          learning_rate_inner=.01),
     "Linear Generalized-SWGG": GeneralizedSWGGGradientFlow(learning_rate_flow=learning_rate_flow,
                                           n_iter_flow=n_iter,
                                           model=nn.Linear(in_features=d, out_features=1),
@@ -74,7 +82,8 @@ models = {
     "1-hidden-layer Generalized-SWGG": GeneralizedSWGGGradientFlow(learning_rate_flow=learning_rate_flow,
                                           n_iter_flow=n_iter,
                                           model=SingleHiddenLayerNet(input_size=d, hidden_size=256, output_size=1),
-                                          n_iter_inner=n_directions),
+                                          n_iter_inner=n_directions,
+                                          learning_rate_inner=.01),
 }
 losses_wasserstein = {
     name: np.zeros((n_repeat, n_iter)) for name in models.keys()

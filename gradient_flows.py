@@ -55,13 +55,13 @@ class GradientFlow(ABC):
         return sources, losses, losses_wass
 
 class GeneralizedSWGGGradientFlow(GradientFlow):
-    def __init__(self, learning_rate_flow, n_iter_flow, model, n_iter_inner):
+    def __init__(self, learning_rate_flow, n_iter_flow, model, 
+                 n_iter_inner, learning_rate_inner=.01, epsilon=5e-2, n_samples_stein=10):
         super().__init__(learning_rate_flow, n_iter_flow)
 
-        # Below : TODO
-        self.epsilon = 5e-2
-        self.n_samples = 10
-        self.learning_rate_inner = .01
+        self.epsilon = epsilon
+        self.n_samples = n_samples_stein
+        self.learning_rate_inner = learning_rate_inner
 
         self.model = model
         self.n_iter_inner = n_iter_inner
@@ -119,34 +119,6 @@ class SWGGGradientFlow(GradientFlow):
         self.epsilon = epsilon
         self.device = device
 
-    # def _P_theta(self, X, theta):
-    #     return X @ theta  # n, 
-
-    # def _Q_theta(self, X, theta):
-    #     return (X @ theta)[:, None] * theta[None, :]  # n, d
-    
-    # def inner_fit(self, source, target):
-    #     n = source.shape[0]
-    #     x_sigma, sigma = torch.sort(self._P_theta(source, theta))
-    #     y_tau, tau = torch.sort(self._P_theta(target, theta))
-
-    #     x_s = x_sigma.repeat_interleave(repeats=self.s, dim=0)
-    #     x_s += 0.5 * self.epsilon * torch.randn(x_s.shape, device=self.device)
-
-    #     y_s = y_tau.repeat_interleave(repeats=self.s, dim=0)
-    #     y_s += 0.5 * self.epsilon * torch.randn(y_s.shape, device=self.device)
-
-    #     Q_source = self._Q_theta(source, theta)
-    #     Q_target = self._Q_theta(target, theta)
-
-    #     barycenter_full_dim = (Q_source[sigma] + Q_target[tau]) / 2
-
-    #     a = torch.sum((source - Q_source) ** 2)
-    #     a += torch.sum((target - Q_target) ** 2)
-    #     a *= 2. / n
-
-    #     b = 2. / n * torch.sum((x_sigma - y_tau) ** 2)
-
     def inner_fit(self, source, target):
         dim = source.shape[1]
         self.theta_ = torch.randn(dim, requires_grad=False)
@@ -197,3 +169,56 @@ class SWGGGradientFlow(GradientFlow):
         
         W_baryZ=torch.sum((bary_blur-Z)**2)/n
         return -4*W_baryZ+2*W_XZ+2*W_YZ
+
+
+class AugmentedSlicedWassersteinGradientFlow(GradientFlow):
+    def __init__(self, learning_rate_flow, n_iter_flow, n_directions, model, lambda_,
+                 learning_rate_inner=.01, n_iter_inner=10):
+        super().__init__(learning_rate_flow, n_iter_flow)
+        self.n_directions = n_directions
+        self.lambda_ = lambda_
+
+        self.learning_rate_inner = learning_rate_inner
+        self.model = model
+        self.n_iter_inner = n_iter_inner
+        self.opt_model = Adam(self.model.parameters(), lr=0.005, betas=(0.999, 0.999))
+        # self.opt_model = Adam(self.model.parameters(), lr=self.learning_rate_inner)
+    
+    def inner_fit(self, source, target):
+        mem_loss_inner = []
+        mem_params = []
+        for _ in range(self.n_iter_inner):
+            loss = F_eps(self.model, source, target, 
+                         fun=F_nn_sqeuc, n_samples=self.n_samples, 
+                         epsilon=self.epsilon)
+            mem_loss_inner.append(loss.item())
+            mem_params.append(self.model.state_dict())
+            loss.backward()
+            self.opt_model.step()
+            self.opt_model.zero_grad()
+    
+    def inner_fit(self, source, target):
+        if self.lambda_ == "auto":
+            lambda_ = 0.05 / target.abs().mean()
+        else:
+            lambda_ = self.lambda_
+        for _ in range(self.n_iter_inner):
+            loss_sw, m_source, m_target = self._forward(source, target)
+            reg = lambda_ * torch.mean(torch.norm(m_source, p=2, dim=1)
+                                       + torch.norm(m_target, p=2, dim=1))
+            loss = reg - loss_sw
+            loss.backward()
+            self.opt_model.step()
+            self.opt_model.zero_grad()
+
+    def _forward(self, source, target):
+        m_source = self.model(source)
+        m_target = self.model(target)
+        directions = torch.randn((self.n_directions, m_source.shape[1]), requires_grad=False)
+        directions /= torch.norm(directions, dim=-1, keepdim=True)
+        ordered_sources = torch.sort(directions @ m_source.T, dim=-1)[0]  # n_dir, n
+        ordered_targets = torch.sort(directions @ m_target.T, dim=-1)[0]  # n_dir, n
+        return torch.mean(torch.abs(ordered_sources - ordered_targets) ** 2), m_source, m_target
+
+    def forward(self, source, target):
+        return self._forward(source, target)[0]
