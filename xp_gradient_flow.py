@@ -10,7 +10,8 @@ from gradient_flows import (GeneralizedSWGGGradientFlow,
                             SlicedWassersteinGradientFlow, 
                             UnOptimizedSWGGGradientFlow,
                             SWGGGradientFlow,
-                            AugmentedSlicedWassersteinGradientFlow)
+                            AugmentedSlicedWassersteinGradientFlow,
+                            MaxSlicedWassersteinGradientFlow)
 
 class SingleHiddenLayerNet(nn.Module):
     def __init__(self, input_size, hidden_size, output_size):
@@ -31,14 +32,10 @@ class SingleHiddenLayerNet(nn.Module):
 class SingleLayerInjectiveNet(nn.Module):
     def __init__(self, input_size, hidden_size):
         super(SingleLayerInjectiveNet, self).__init__()
-        self.fc1 = nn.Linear(input_size, hidden_size)
-        self.relu = nn.ReLU()
-
-        # He init.
-        nn.init.kaiming_uniform_(self.fc1.weight, nonlinearity='relu')
+        self.fc1 = nn.Sequential(nn.Linear(input_size, hidden_size))
 
     def forward(self, x):
-        h = self.relu(self.fc1(x))
+        h = self.fc1(x)
         h = torch.cat((x, h), dim=-1)
         return h
 
@@ -61,19 +58,25 @@ models = {
     "SW": SlicedWassersteinGradientFlow(learning_rate_flow=learning_rate_flow,
                                           n_iter_flow=n_iter,
                                           n_directions=n_directions),
+    "Max-SW": MaxSlicedWassersteinGradientFlow(learning_rate_flow=learning_rate_flow,
+                                          n_iter_flow=n_iter,
+                                          d=d,
+                                          n_iter_inner=n_directions,
+                                          learning_rate_inner=.01),
     "SWGG (no optim.)": UnOptimizedSWGGGradientFlow(learning_rate_flow=learning_rate_flow,
                                           n_iter_flow=n_iter,
                                           n_directions=n_directions),
     "SWGG (optim.)": SWGGGradientFlow(learning_rate_flow=learning_rate_flow,
                                           n_iter_flow=n_iter,
+                                          d=d,
                                           n_iter_inner=n_directions,
                                           learning_rate_inner=.01),
-    "ASWD": AugmentedSlicedWassersteinGradientFlow(learning_rate_flow=.002,
+    "ASWD": AugmentedSlicedWassersteinGradientFlow(learning_rate_flow=learning_rate_flow,
                                           n_iter_flow=n_iter,
-                                          model=SingleLayerInjectiveNet(input_size=d, hidden_size=256),
+                                          model=SingleLayerInjectiveNet(input_size=d, hidden_size=d),
                                           n_iter_inner=10,
                                           n_directions=n_directions,
-                                          lambda_="auto",
+                                          lambda_=.1,
                                           learning_rate_inner=.01),
     "Linear Generalized-SWGG": GeneralizedSWGGGradientFlow(learning_rate_flow=learning_rate_flow,
                                           n_iter_flow=n_iter,
