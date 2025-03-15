@@ -33,6 +33,11 @@ def F(x, y, theta, p=2):
     pos_y_1d = torch.argsort(theta @ y.T)
     return torch.mean(torch.sum(torch.abs(x[pos_x_1d] - y[pos_y_1d]) ** p, dim=-1), dim=0)
 
+def F_module(x, y, model, p=2):
+    pos_x_1d = torch.argsort(model(x).flatten())
+    pos_y_1d = torch.argsort(model(y).flatten())
+    return torch.mean(torch.sum(torch.abs(x[pos_x_1d] - y[pos_y_1d]) ** p, dim=-1), dim=0)
+
 
 def F_batch(thetas, x, y, fun=None):
     if fun is None:
@@ -169,57 +174,14 @@ def F_eps(theta, x, y, fun, n_samples, epsilon, device="cpu"):
         return F_epsilon.apply(theta, x, y, fun, n_samples, epsilon, device)
 
 
-if __name__ == "__main__":
-    import matplotlib.pyplot as plt
-    from sklearn.datasets import make_sparse_spd_matrix
-    torch.manual_seed(0)
-    np.random.seed(0)
+def swgg_opt(x, y, model, opt, 
+             n_iter=1000, epsilon_Stein=5e-2, n_samples_Stein=10, log=False):
+    for i in range(n_iter):
+        opt.zero_grad()
+        loss = F_eps(model, x, y, fun=F_module, 
+                     n_samples=n_samples_Stein, epsilon=epsilon_Stein)
+        loss.backward()
+        if log and i % 100 == 0:
+            print(f"swgg log loss={loss.item():.3f}")
+        opt.step()
 
-    def draw_samples(n, d):
-        cov_x = make_sparse_spd_matrix(dim=d, random_state=42,alpha=0.99, smallest_coef=0, largest_coef=0.22)
-        diag_x = np.eye(d)
-        for i in range(d//2):
-            diag_x[i,i] = 20
-        cov_x = cov_x + diag_x
-        #cov_x[1,1] = 20
-        mu_x = np.random.randn(d)
-        x = np.random.multivariate_normal(mu_x, cov_x, size=n)
-        cov_y = np.eye(d)
-        cov_y = make_sparse_spd_matrix(dim=d, random_state=43)
-        mu_y =  np.random.randn(d) 
-        mu_y[0:d//2] =  mu_y[0:d//2] + 20
-        #mu_y[0] =  mu_y[0] + 10 #1dim is the most important
-        y = np.random.multivariate_normal(mu_y, cov_y, size=n)  
-        return torch.tensor(x).float(), torch.tensor(y).float()
-
-    n = 100
-    epsilon = .1
-    n_samples = 10
-    d = 3
-    p = 1 # W_1
-    x, y = draw_samples(n, d)
-    learning_rate = 0.005
-    n_iter = 1000
-    n_reps = 3
-
-    losses = {}
-    for id_rep in range(n_reps):
-        losses[id_rep] = []
-        thetas = [torch.randn(d, requires_grad=True)]
-        for i in range(n_iter):
-            with torch.no_grad():
-                thetas[-1] /= torch.norm(thetas[-1])
-            loss = F_eps(thetas[-1], x, y, 
-                         fun=F, n_samples=n_samples, epsilon=epsilon)
-            loss.backward()
-            with torch.no_grad():
-                losses[id_rep].append(loss.item())
-                theta_t = thetas[-1] - learning_rate * thetas[-1].grad
-                theta_t.requires_grad_()
-                thetas.append(theta_t)
-    
-    for l in losses.values():
-        plt.plot(l, color='b')
-    plt.legend(["$F_{\\varepsilon}$"])
-    plt.title("Et tout ça en torch")
-    plt.show()
