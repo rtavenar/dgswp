@@ -323,7 +323,10 @@ class SWGGConditionalFlowMatcher(ConditionalFlowMatcher):
         sigma : Union[float, int]
         """
         super().__init__(sigma)
-        self.ot_sampler = SWGGSampler(fine_tuning_steps=10)
+        self.ot_sampler = SWGGSampler(
+            n_iter=300, fine_tuning_steps=0, 
+            epsilon_Stein=5e-2, n_samples_Stein=10
+        )
 
     def precompute_map(self, x0, x1):
         self.indices0_, self.indices1_ = self.ot_sampler.get_map(x0, x1)
@@ -543,11 +546,12 @@ class OTPlanSampler:
 
 
 class SWGGSampler:
-    def __init__(self, fine_tuning_steps=None):
-        self.n_iter = 300
-        self.epsilon_Stein = 5e-2
-        self.n_samples_Stein = 10
-        self.model_ = torch.nn.Sequential(
+    def __init__(self, n_iter=300, fine_tuning_steps=None, 
+                 epsilon_Stein=5e-2, n_samples_Stein=10):
+        self.n_iter = n_iter
+        self.epsilon_Stein = epsilon_Stein
+        self.n_samples_Stein = n_samples_Stein
+        self.model_ = torch.nn.Sequential(  # TODO
             torch.nn.Linear(in_features=2, out_features=256),
             torch.nn.Linear(in_features=256, out_features=1)
         )

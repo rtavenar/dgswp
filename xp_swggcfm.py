@@ -5,7 +5,7 @@ import sys
 import torch
 import numpy as np
 
-from cfm import ConditionalFlowMatcher
+from cfm import SWGGConditionalFlowMatcher
 from cfm_utils import sample_8gaussians, sample_moons
 
 
@@ -32,9 +32,10 @@ savedir = "models_cfm/8gaussian-moons"
 os.makedirs(savedir, exist_ok=True)
 
 try:
-    seed = int(sys.argv[1])
+    ratio = int(sys.argv[1])
+    seed = int(sys.argv[2])
 except:
-    sys.stderr.write(f"{sys.argv[0]} seed\n")
+    sys.stderr.write(f"{sys.argv[0]} ratio seed\n")
     sys.exit(-1)
 
 torch.manual_seed(seed)
@@ -45,36 +46,41 @@ dim = 2
 batch_size = 256
 model = MLP(dim=dim, time_varying=True)
 optimizer = torch.optim.Adam(model.parameters())
-FM = ConditionalFlowMatcher(sigma=sigma)
+FM = SWGGConditionalFlowMatcher(sigma=sigma)
 
 epochs = 20000
 
 start = time.time()
-for k in range(epochs):
-    optimizer.zero_grad()
+for k in range(epochs // ratio):
+    x0 = sample_8gaussians(batch_size * ratio)
+    x1 = sample_moons(batch_size * ratio)
+    FM.precompute_map(x0, x1)
 
-    x0 = sample_8gaussians(batch_size)
-    x1 = sample_moons(batch_size)
+    for i_gradient_steps in range(ratio):
+        optimizer.zero_grad()
 
-    t, xt, ut = FM.sample_location_and_conditional_flow(x0, x1)
+        t, xt, ut = FM.sample_location_and_conditional_flow_from_indices(
+            slice(i_gradient_steps * batch_size, (i_gradient_steps + 1) * batch_size)
+        )
 
-    vt = model(torch.cat([xt, t[:, None]], dim=-1))
-    loss = torch.mean((vt - ut) ** 2)
+        vt = model(torch.cat([xt, t[:, None]], dim=-1))
+        loss = torch.mean((vt - ut) ** 2)
 
-    loss.backward()
-    optimizer.step()
+        loss.backward()
+        optimizer.step()
 
-    if (k + 1) % 5000 == 0:
+    if (k + 1) % (5000 // ratio) == 0:
         end = time.time()
-        print(f"{k+1}: loss {loss.item():0.3f} time {(end - start):0.2f}")
-        torch.save(model, f"{savedir}/cfm_e{k+1}_seed{seed}.pt")
+        print(f"{k+1} (equivalent to {(k+1)*ratio}): loss {loss.item():0.3f} time {(end - start):0.2f}")
+        torch.save(model, f"{savedir}/swggcfm_k{ratio}_e{(k+1)*ratio}_seed{seed}.pt")
 
 end = time.time()
 info = {
-    "name": "CFM",
+    "name": "SWGG-CFM",
     "epochs": epochs,
+    "k": ratio,
     "seed": seed,
-    "model": f"cfm_e{epochs}_seed{seed}.pt",
+    "model": f"swggcfm_k{ratio}_e{epochs}_seed{seed}.pt",
     "time": (end - start)
 }
-json.dump(info, open(f"{savedir}/cfm_e{epochs}_seed{seed}.json", "w"))
+json.dump(info, open(f"{savedir}/swggcfm_k{ratio}_e{epochs}_seed{seed}.json", "w"))

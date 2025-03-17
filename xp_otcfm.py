@@ -5,7 +5,7 @@ import sys
 import torch
 import numpy as np
 
-from cfm import ConditionalFlowMatcher
+from cfm import ExactOptimalTransportConditionalFlowMatcher
 from cfm_utils import sample_8gaussians, sample_moons
 
 
@@ -45,7 +45,7 @@ dim = 2
 batch_size = 256
 model = MLP(dim=dim, time_varying=True)
 optimizer = torch.optim.Adam(model.parameters())
-FM = ConditionalFlowMatcher(sigma=sigma)
+FM = ExactOptimalTransportConditionalFlowMatcher(sigma=sigma)
 
 epochs = 20000
 
@@ -67,14 +67,14 @@ for k in range(epochs):
     if (k + 1) % 5000 == 0:
         end = time.time()
         print(f"{k+1}: loss {loss.item():0.3f} time {(end - start):0.2f}")
-        torch.save(model, f"{savedir}/cfm_e{k+1}_seed{seed}.pt")
+        torch.save(model, f"{savedir}/otcfm_e{k+1}_seed{seed}.pt")
 
 end = time.time()
 info = {
-    "name": "CFM",
+    "name": "OT-CFM",
     "epochs": epochs,
     "seed": seed,
-    "model": f"cfm_e{epochs}_seed{seed}.pt",
+    "model": f"otcfm_e{epochs}_seed{seed}.pt",
     "time": (end - start)
 }
-json.dump(info, open(f"{savedir}/cfm_e{epochs}_seed{seed}.json", "w"))
+json.dump(info, open(f"{savedir}/otcfm_e{epochs}_seed{seed}.json", "w"))
