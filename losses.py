@@ -28,21 +28,21 @@ def sample_noise_with_gradients(n_samples, shape):
 
     return all_samples, gradients
 
-def F(x, y, theta, p=2):
+def F(x, y, theta, metric='sqeuclidean', p=2,): #implements only sqeuclidean for now
     pos_x_1d = torch.argsort(theta @ x.T)
     pos_y_1d = torch.argsort(theta @ y.T)
     return torch.mean(torch.sum(torch.abs(x[pos_x_1d] - y[pos_y_1d]) ** p, dim=-1), dim=0)
 
-def F_module(x, y, model, p=2):
+def F_module(x, y, model, metric='sqeuclidean', p=2):
     pos_x_1d = torch.argsort(model(x).flatten())
     pos_y_1d = torch.argsort(model(y).flatten())
     return torch.mean(torch.sum(torch.abs(x[pos_x_1d] - y[pos_y_1d]) ** p, dim=-1), dim=0)
 
 
-def F_batch(thetas, x, y, fun=None):
+def F_batch(thetas, x, y, fun=None, metric='sqeuclidean', p=2):
     if fun is None:
-        fun = lambda x, y, theta: F(x, y, theta)
-    return torch.tensor([fun(x, y, theta) for theta in thetas], requires_grad=True)
+        fun = lambda x, y, theta, metric, p: F(x, y, theta, metric, p)
+    return torch.tensor([fun(x, y, theta, metric, p) for theta in thetas], requires_grad=True)
 
 class F_epsilon(torch.autograd.Function):
     @staticmethod

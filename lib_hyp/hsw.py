@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 
-from utils_hyperbolic import projection, minkowski_ip, minkowski_ip2
+from .utils_hyperbolic import projection, minkowski_ip, minkowski_ip2
 
 
 def emd1D(u_values, v_values, u_weights=None, v_weights=None,p=1, require_sort=True):

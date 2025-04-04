@@ -3,6 +3,9 @@ import numpy as np
 import torch
 import ot
 from abc import ABC, abstractmethod
+from lib_hyp.utils_hyperbolic import *
+from  geoopt.optim import RiemannianAdam
+import geoopt
 
 from losses import F_eps
 
@@ -14,12 +17,24 @@ def wass(x, y):
     b = torch.ones(y.shape[0])/y.shape[0]
     return ot.emd2(a, b, dists)
 
-def F_nn(x, y, model, p):
+def F_nn(x, y, model, metric, p):
     pos_x_1d = torch.argsort(model(x).flatten())
     pos_y_1d = torch.argsort(model(y).flatten())
-    return torch.mean(torch.sum(torch.abs(x[pos_x_1d] - y[pos_y_1d]) ** p, dim=-1), dim=0)
+    return F_dist(x[pos_x_1d], y[pos_y_1d], metric, p)
 
-F_nn_sqeuc = lambda x, y, model: F_nn(x, y, model, p=2)
+
+
+def F_dist(x, y, metric='sqeuclidean', p=2):
+    if metric == 'sqeuclidean':
+        return torch.mean(torch.sum(torch.abs(x - y) ** p, dim=-1), dim=0)
+    elif metric == 'poincare':
+        return torch.mean(dist_poincare(x, y))
+    else:
+        print("error: metric should be either sqeuclidean or poincare")
+    
+
+F_nn_sqeuc = lambda x, y, model, metric, p: F_nn(x, y, model, metric='sqeuclidean', p=2)
+F_nn_poincare = lambda x, y, model, metric, p : F_nn(x, y, model, metric='poincare', p=None)
 
 
 class GradientFlow(ABC):
@@ -82,7 +97,7 @@ class GeneralizedSWGGGradientFlow(GradientFlow):
         self.model.load_state_dict(mem_params[np.argmin(mem_loss_inner)])
 
     def forward(self, source, target):
-        return F_nn_sqeuc(source, target, self.model)
+        return F_nn_sqeuc(source, target, self.model, metric='sqeuclidean', p=None)
 
 class SlicedWassersteinGradientFlow(GradientFlow):
     def __init__(self, learning_rate_flow, n_iter_flow, n_directions):
@@ -117,6 +132,64 @@ class MaxSlicedWassersteinGradientFlow(GradientFlow):
         ordered_sources = torch.sort(self.theta_ @ source.T, dim=-1)[0]  # n, 
         ordered_targets = torch.sort(self.theta_ @ target.T, dim=-1)[0]  # n, 
         return torch.mean(torch.abs(ordered_sources - ordered_targets) ** 2)
+
+class GeneralizedSWGGGradientFlow_busemann(GradientFlow):
+    def __init__(self, learning_rate_flow, n_iter_flow, model, n_iter_inner, lr_inner, n_samples, eps):
+        super().__init__(learning_rate_flow, n_iter_flow)
+
+        # Below : TODO
+        self.epsilon = eps #5e-2
+        self.n_samples = n_samples
+        self.learning_rate_inner = lr_inner #0.01
+
+        self.model = model
+        self.n_iter_inner = n_iter_inner
+        #the inner fit is done with Adam
+        self.opt_model = Adam(self.model.parameters(), lr=self.learning_rate_inner)
+
+    def fit(self, source, target):
+        losses = []
+        losses_wass = []
+        #the outer fit is done with Riemannian Adam as the source samples are on the Poincare ball
+        manifold = geoopt.PoincareBall()
+        source = geoopt.ManifoldTensor(source.clone().detach().numpy(), manifold=manifold, requires_grad=True)
+        source = geoopt.ManifoldParameter(source)
+        sources = [source.clone().detach().numpy()]
+        opt_source = RiemannianAdam([source], lr=self.learning_rate_flow, stabilize=1) #stabilize to avoid numerical instabilities
+
+        for _ in range(self.n_iter_flow):
+            self.inner_fit(source, target)
+            loss = self.forward(source, target)
+            loss.backward()
+            losses.append(loss.item())
+            opt_source.step()
+            opt_source.zero_grad()
+            sources.append(source.clone().detach().numpy())
+            losses_wass.append(wass(source, target).detach().numpy())
+        return sources, losses, losses_wass
+    
+    def inner_fit(self, source, target):
+        mem_loss_inner = []
+        mem_params = []
+        for _ in range(self.n_iter_inner):
+            loss = F_eps(self.model, source, target, 
+                         fun=F_nn_poincare, n_samples=self.n_samples, 
+                         epsilon=self.epsilon)
+            mem_loss_inner.append(loss.item())
+            mem_params.append(self.model.state_dict())
+
+            loss.backward()
+            self.opt_model.step()
+            self.opt_model.zero_grad()
+        
+        self.model.load_state_dict(mem_params[np.argmin(mem_loss_inner)])
+        ##plt.plot(mem_loss_inner)
+        #plt.show()
+
+    def forward(self, source, target):
+        return F_nn_poincare(source, target, self.model, metric="poincare", p=None) 
+
+
 
 class UnOptimizedSWGGGradientFlow(GradientFlow):
     def __init__(self, learning_rate_flow, n_iter_flow, n_directions):

@@ -3,7 +3,7 @@ import torch
 import numpy as np
 import torch.nn.functional as F
 
-import utils_hyperbolic as hyp
+import lib_hyp.utils_hyperbolic as hyp
 
 from losses import F_eps
 

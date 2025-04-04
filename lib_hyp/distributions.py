@@ -3,7 +3,7 @@ import torch.distributions as D
 import torch.nn.functional as F
 import numpy as np
 
-from utils_hyperbolic import parallelTransport, expMap
+from .utils_hyperbolic import parallelTransport, expMap
 
 
 def sampleWrappedNormal(mu, Sigma, n):
