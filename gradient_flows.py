@@ -4,8 +4,9 @@ import torch
 import ot
 from abc import ABC, abstractmethod
 from lib_hyp.utils_hyperbolic import *
-from  geoopt.optim import RiemannianAdam
+from  geoopt.optim import RiemannianAdam, RiemannianSGD
 import geoopt
+import matplotlib.pyplot as plt
 
 from losses import F_eps
 
@@ -17,24 +18,30 @@ def wass(x, y):
     b = torch.ones(y.shape[0])/y.shape[0]
     return ot.emd2(a, b, dists)
 
+def wass_poincare(x, y):
+    dists = dist_poincare2(x, y)
+    a = torch.ones(x.shape[0])/x.shape[0]
+    b = torch.ones(y.shape[0])/y.shape[0]
+    return ot.emd2(a, b, dists)
+
 def F_nn(x, y, model, metric, p):
     pos_x_1d = torch.argsort(model(x).flatten())
     pos_y_1d = torch.argsort(model(y).flatten())
     return F_dist(x[pos_x_1d], y[pos_y_1d], metric, p)
 
 
-
 def F_dist(x, y, metric='sqeuclidean', p=2):
     if metric == 'sqeuclidean':
         return torch.mean(torch.sum(torch.abs(x - y) ** p, dim=-1), dim=0)
     elif metric == 'poincare':
-        return torch.mean(dist_poincare(x, y))
+        #return torch.mean(dist_poincare(x, y))
+        return torch.mean(torch.arccosh(torch.clamp(-minkowski_ip(poincare_to_lorentz(x), poincare_to_lorentz(y)), min=1+1e-15))**2)
     else:
-        print("error: metric should be either sqeuclidean or poincare")
-    
+        raise ValueError("error: metric should be either sqeuclidean or poincare")
 
-F_nn_sqeuc = lambda x, y, model, metric, p: F_nn(x, y, model, metric='sqeuclidean', p=2)
-F_nn_poincare = lambda x, y, model, metric, p : F_nn(x, y, model, metric='poincare', p=None)
+
+F_nn_sqeuc = lambda x, y, model: F_nn(x, y, model, metric='sqeuclidean', p=2)
+F_nn_poincare = lambda x, y, model: F_nn(x, y, model, metric='poincare', p=None)
 
 
 class GradientFlow(ABC):
@@ -57,7 +64,7 @@ class GradientFlow(ABC):
         source = torch.tensor(source.clone().detach().numpy(), 
                               dtype=torch.float32, requires_grad=True)
         sources = [source.clone().detach().numpy()]
-        opt_source = Adam([source], lr=self.learning_rate_flow)
+        opt_source = SGD([source], lr=self.learning_rate_flow)
         for _ in range(self.n_iter_flow):
             self.inner_fit(source.detach(), target.detach())
             loss = self.forward(source, target)
@@ -71,7 +78,7 @@ class GradientFlow(ABC):
 
 class GeneralizedSWGGGradientFlow(GradientFlow):
     def __init__(self, learning_rate_flow, n_iter_flow, model, 
-                 n_iter_inner, learning_rate_inner=.01, epsilon=5e-2, n_samples_stein=10):
+                 n_iter_inner, learning_rate_inner=0.01, epsilon=5e-2, n_samples_stein=10):
         super().__init__(learning_rate_flow, n_iter_flow)
 
         self.epsilon = epsilon
@@ -80,24 +87,31 @@ class GeneralizedSWGGGradientFlow(GradientFlow):
 
         self.model = model
         self.n_iter_inner = n_iter_inner
-        self.opt_model = Adam(self.model.parameters(), lr=self.learning_rate_inner)
+        self.fundist = F_nn_sqeuc
+        self.fundist.__name__ = "F_nn_sqeuc"
+        self.opt_model = SGD(self.model.parameters(), lr=self.learning_rate_inner)
     
     def inner_fit(self, source, target):
+        target = target.type(torch.float64) 
+        source = source.type(torch.float64)
         mem_loss_inner = []
         mem_params = []
         for _ in range(self.n_iter_inner):
             loss = F_eps(self.model, source, target, 
-                         fun=F_nn_sqeuc, n_samples=self.n_samples, 
+                         fun=self.fundist, n_samples=self.n_samples, 
                          epsilon=self.epsilon)
             mem_loss_inner.append(loss.item())
             mem_params.append(self.model.state_dict())
+            #print(mem_params[-1])
             loss.backward()
             self.opt_model.step()
             self.opt_model.zero_grad()
         self.model.load_state_dict(mem_params[np.argmin(mem_loss_inner)])
+        #plt.plot(mem_loss_inner)
+        #plt.show()
 
     def forward(self, source, target):
-        return F_nn_sqeuc(source, target, self.model, metric='sqeuclidean', p=None)
+        return self.fundist(source, target, self.model)
 
 class SlicedWassersteinGradientFlow(GradientFlow):
     def __init__(self, learning_rate_flow, n_iter_flow, n_directions):
@@ -133,63 +147,56 @@ class MaxSlicedWassersteinGradientFlow(GradientFlow):
         ordered_targets = torch.sort(self.theta_ @ target.T, dim=-1)[0]  # n, 
         return torch.mean(torch.abs(ordered_sources - ordered_targets) ** 2)
 
-class GeneralizedSWGGGradientFlow_busemann(GradientFlow):
-    def __init__(self, learning_rate_flow, n_iter_flow, model, n_iter_inner, lr_inner, n_samples, eps):
-        super().__init__(learning_rate_flow, n_iter_flow)
+class GeneralizedSWGGGradientFlowOnManifolds(GeneralizedSWGGGradientFlow):
+    def __init__(self, learning_rate_flow, n_iter_flow, model, manifold="Euclidean", n_iter_inner=50, learning_rate_inner=.01, epsilon=5e0, n_samples_stein=10):
+        super().__init__(learning_rate_flow, n_iter_flow, model, n_iter_inner, learning_rate_inner, epsilon, n_samples_stein)
 
-        # Below : TODO
-        self.epsilon = eps #5e-2
-        self.n_samples = n_samples
-        self.learning_rate_inner = lr_inner #0.01
+        self.manifold = manifold
+        if self.manifold == "poincare":
+            self.fundist = F_nn_poincare
+            self.fundist.__name__ = "F_nn_poincare"
+        else:
+            print("the manifold is not implemented yet: running on Euclidean = nx.single_source_shortest_path_length(graph, source)= nx.single_source_shortest_path_length(graph, source)one")
+            self.fundist = F_nn_sqeuc
+            self.fundist.__name__ = "F_nn_sqeuc"
 
-        self.model = model
-        self.n_iter_inner = n_iter_inner
-        #the inner fit is done with Adam
-        self.opt_model = Adam(self.model.parameters(), lr=self.learning_rate_inner)
+        self.opt_model = RiemannianSGD([self.model.manifold_paramter()], lr=self.learning_rate_inner) #should belong to the Poincaré ball
 
     def fit(self, source, target):
         losses = []
         losses_wass = []
-        #the outer fit is done with Riemannian Adam as the source samples are on the Poincare ball
-        manifold = geoopt.PoincareBall()
+
+        if self.manifold == "poincare":
+            manifold = geoopt.PoincareBall()
+        else:
+            print("only the Poincaré manifold is implemented: running on Euclidean one")
+            manifold = geoopt.Euclidean()
         source = geoopt.ManifoldTensor(source.clone().detach().numpy(), manifold=manifold, requires_grad=True)
-        source = geoopt.ManifoldParameter(source)
+        source = geoopt.ManifoldParameter(source, manifold=manifold)
+        
+        opt_source = RiemannianSGD([source], lr=self.learning_rate_flow, stabilize=1) #stabilize to avoid numerical instabilities
+
         sources = [source.clone().detach().numpy()]
-        opt_source = RiemannianAdam([source], lr=self.learning_rate_flow, stabilize=1) #stabilize to avoid numerical instabilities
 
         for _ in range(self.n_iter_flow):
-            self.inner_fit(source, target)
-            loss = self.forward(source, target)
-            loss.backward()
-            losses.append(loss.item())
-            opt_source.step()
+            self.inner_fit(source.detach(), target.detach()) #optimize the direction
             opt_source.zero_grad()
+            loss = self.forward(source, target) 
+            loss.backward() 
+            losses.append(loss.item())
+
+            prev_source = source.clone().detach()
+
+            opt_source.step()
+            if source.isnan().any(): #Optimizing on manifolds is prone to numerical instabilities
+                #in that case, we do not update the source
+                with torch.no_grad():
+                    source[np.where(torch.isnan(source))[0]] = prev_source[np.where(torch.isnan(source))[0]]
+
             sources.append(source.clone().detach().numpy())
-            losses_wass.append(wass(source, target).detach().numpy())
+            losses_wass.append(wass_poincare(source, target).detach().numpy())
         return sources, losses, losses_wass
     
-    def inner_fit(self, source, target):
-        mem_loss_inner = []
-        mem_params = []
-        for _ in range(self.n_iter_inner):
-            loss = F_eps(self.model, source, target, 
-                         fun=F_nn_poincare, n_samples=self.n_samples, 
-                         epsilon=self.epsilon)
-            mem_loss_inner.append(loss.item())
-            mem_params.append(self.model.state_dict())
-
-            loss.backward()
-            self.opt_model.step()
-            self.opt_model.zero_grad()
-        
-        self.model.load_state_dict(mem_params[np.argmin(mem_loss_inner)])
-        ##plt.plot(mem_loss_inner)
-        #plt.show()
-
-    def forward(self, source, target):
-        return F_nn_poincare(source, target, self.model, metric="poincare", p=None) 
-
-
 
 class UnOptimizedSWGGGradientFlow(GradientFlow):
     def __init__(self, learning_rate_flow, n_iter_flow, n_directions):
@@ -202,6 +209,7 @@ class UnOptimizedSWGGGradientFlow(GradientFlow):
         ordered_sources = source[torch.argsort(directions @ source.T, dim=-1)]  # n_dir, n, d
         ordered_targets = target[torch.argsort(directions @ target.T, dim=-1)]  # n_dir, n, d
         return torch.min(torch.mean(torch.sum(torch.abs(ordered_sources - ordered_targets) ** 2, dim=2), dim=1))
+
 
 class SWGGGradientFlow(GradientFlow):
     def __init__(self, learning_rate_flow, n_iter_flow, 
