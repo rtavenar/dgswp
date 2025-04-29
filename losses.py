@@ -23,9 +23,10 @@ def sample_noise_with_gradients(n_samples, shape, normalize=False):
     sampler = Normal(0.0, 1.0)
     samples = sampler.sample(actual_shape)
     first_sample = torch.zeros(shape)
-    all_samples = torch.cat((first_sample.unsqueeze(0), samples), dim=0)
     if normalize:
-        all_samples /= torch.norm(all_samples, dim=-1, keepdim=True)
+        samples[:,:-1] /= torch.norm(samples[:,:-1], dim=-1, keepdim=True)**2
+
+    all_samples = torch.cat((first_sample.unsqueeze(0), samples), dim=0)
     gradients = all_samples
 
     return all_samples, gradients
@@ -35,7 +36,7 @@ def F(x, y, theta, metric='sqeuclidean', p=2,): #implements only sqeuclidean for
     pos_y_1d = torch.argsort(theta @ y.T)
     return torch.mean(torch.sum(torch.abs(x[pos_x_1d] - y[pos_y_1d]) ** p, dim=-1), dim=0)
 
-def F_module(x, y, model, metric='sqeuclidean', p=2):
+def F_module(x, y, model, metric='sqeuclidean', p=2): #implements only sqeuclidean for now
     pos_x_1d = torch.argsort(model(x).flatten())
     pos_y_1d = torch.argsort(model(y).flatten())
     return torch.mean(torch.sum(torch.abs(x[pos_x_1d] - y[pos_y_1d]) ** p, dim=-1), dim=0)
@@ -94,9 +95,9 @@ class F_epsilon_module(torch.autograd.Function):
         objects for use in the backward pass using the ctx.save_for_backward method.
         """
         normalize = False
-        #print("fun", fun.__name__)
-        if fun.__name__ == "F_nn_poincare":
+        if str(module) == "BusemannMap()":  
             normalize = True
+
         perturbed_modules = [copy.deepcopy(module) for _ in range(n_samples + 1)]  # list of N+1 models
         noise_gradients = []  # list of len(module.parameters()) noise gradients
         module_parameters = list(module.parameters())
