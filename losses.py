@@ -28,25 +28,25 @@ def sample_noise_with_gradients(n_samples, shape):
 
     return all_samples, gradients
 
-def F(x, y, theta, p=2):
+def H_linear(x, y, theta, p=2):
     pos_x_1d = torch.argsort(theta @ x.T)
     pos_y_1d = torch.argsort(theta @ y.T)
     return torch.mean(torch.sum(torch.abs(x[pos_x_1d] - y[pos_y_1d]) ** p, dim=-1), dim=0)
 
-def F_module(x, y, model, p=2):
+def H_module(x, y, model, p=2):
     pos_x_1d = torch.argsort(model(x).flatten())
     pos_y_1d = torch.argsort(model(y).flatten())
     return torch.mean(torch.sum(torch.abs(x[pos_x_1d] - y[pos_y_1d]) ** p, dim=-1), dim=0)
 
 
-def F_batch(thetas, x, y, fun=None):
+def H_batch(thetas, x, y, fun=None):
     if fun is None:
-        fun = lambda x, y, theta: F(x, y, theta)
+        fun = H_linear
     return torch.tensor([fun(x, y, theta) for theta in thetas], requires_grad=True)
 
-class F_epsilon(torch.autograd.Function):
+class H_epsilon_linear(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, theta, x, y, fun, n_samples, epsilon, device):
+    def forward(ctx, theta, x, y, fun, n_samples, epsilon, variance_reduction, device):
         """
         In the forward pass we receive a Tensor containing the input and return
         a Tensor containing the output. ctx is a context object that can be used
@@ -58,9 +58,10 @@ class F_epsilon(torch.autograd.Function):
         additive_noise = additive_noise.to(device)
         noise_gradient = noise_gradient.to(device)  # [N+1, D]
         perturbed_input = theta + epsilon * additive_noise  # [N+1, D]
-        perturbed_output = F_batch(perturbed_input, x, y, fun)  # [N+1, ]
+        perturbed_output = H_batch(perturbed_input, x, y, fun).to(device)  # [N+1, ]
 
         ctx.save_for_backward(perturbed_output, noise_gradient, torch.tensor(epsilon))
+        ctx.variance_reduction = variance_reduction
         return torch.mean(perturbed_output, dim=0)
 
     @staticmethod
@@ -73,18 +74,21 @@ class F_epsilon(torch.autograd.Function):
         perturbed_output, noise_gradient, epsilon = ctx.saved_tensors
 
         F0 = perturbed_output[0]
-        F_minus_F0 = grad_output * (perturbed_output[1:] - F0)
+        if ctx.variance_reduction:
+            F_minus_F0 = grad_output * (perturbed_output[1:] - F0)
+        else:
+            F_minus_F0 = grad_output * perturbed_output[1:]
         F_minus_F0_reshaped = F_minus_F0
         for _ in range(len(noise_gradient.shape) - 1):
             F_minus_F0_reshaped = F_minus_F0_reshaped.unsqueeze(1)
 
         grad_theta = F_minus_F0_reshaped * noise_gradient[1:] / epsilon
         
-        return torch.mean(grad_theta, dim=0), None, None, None, None, None, None
+        return torch.mean(grad_theta, dim=0), None, None, None, None, None, None, None
 
-class F_epsilon_module(torch.autograd.Function):
+class H_epsilon_module(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, module, x, y, fun, n_samples, epsilon, device):
+    def forward(ctx, module, x, y, fun, n_samples, epsilon, variance_reduction, device):
         """
         In the forward pass we receive a Tensor containing the input and return
         a Tensor containing the output. ctx is a context object that can be used
@@ -102,10 +106,11 @@ class F_epsilon_module(torch.autograd.Function):
             for idx_m, m in enumerate(perturbed_modules):
                 list(m.parameters())[i_param] += epsilon * additive_noise[idx_m]
             noise_gradients.append(noise_gradient)
-        perturbed_output = F_batch(perturbed_modules, x, y, fun)  # [N+1, ]
+        perturbed_output = H_batch(perturbed_modules, x, y, fun).to(device)  # [N+1, ]
 
         ctx.save_for_backward(perturbed_output, *noise_gradients, torch.tensor(epsilon))
         ctx.module = module
+        ctx.variance_reduction = variance_reduction
         return torch.mean(perturbed_output, dim=0)
 
     @staticmethod
@@ -122,7 +127,10 @@ class F_epsilon_module(torch.autograd.Function):
         module = ctx.module
 
         F0 = perturbed_output[0]
-        F_minus_F0 = grad_output * (perturbed_output[1:] - F0)
+        if ctx.variance_reduction:
+            F_minus_F0 = grad_output * (perturbed_output[1:] - F0)
+        else:
+            F_minus_F0 = grad_output * perturbed_output[1:]
         module_parameters = list(module.parameters())
         for i_param in range(len(module_parameters)):
             noise_gradient = noise_gradients[i_param]
@@ -135,12 +143,12 @@ class F_epsilon_module(torch.autograd.Function):
             else:
                 module_parameters[i_param].grad += torch.mean(grad_theta, dim=0)
         
-        return None, None, None, None, None, None, None
+        return None, None, None, None, None, None, None, None
         
 
-def F_eps(theta, x, y, fun, n_samples, epsilon, device="cpu"):
+def H_eps(theta, x, y, fun, n_samples, epsilon, variance_reduction=True, device="cpu"):
     """
-    This is the main function to be used for $F_\varepsilon$ computation.
+    This is the main function to be used for $H_\varepsilon$ computation.
     
     Arguments
     ---------
@@ -152,7 +160,7 @@ def F_eps(theta, x, y, fun, n_samples, epsilon, device="cpu"):
         Input distributions in full dimension
     
     fun: function that takes x, y, theta as input
-        Our $F$ function (operating on a single theta, be it a tensor of parameters or a module)
+        Our $h$ function (operating on a single theta, be it a tensor of parameters or a module)
 
     n_samples: int
         Number of samples to be drawn for the Stein lemma's approximation of the gradient
@@ -167,21 +175,36 @@ def F_eps(theta, x, y, fun, n_samples, epsilon, device="cpu"):
         # Ugly hack, not sure why we need that :(
         requires_grad = x.requires_grad
         x.requires_grad_()
-        ret = F_epsilon_module.apply(theta, x, y, fun, n_samples, epsilon, device)
+        ret = H_epsilon_module.apply(theta, x, y, fun, n_samples, epsilon, variance_reduction, device)
         x.requires_grad_(requires_grad)
         return ret
     else:
-        return F_epsilon.apply(theta, x, y, fun, n_samples, epsilon, device)
+        return H_epsilon_linear.apply(theta, x, y, fun, n_samples, epsilon, variance_reduction, device)
 
 
-def swgg_opt(x, y, model, opt, 
-             n_iter=1000, epsilon_Stein=5e-2, n_samples_Stein=10, log=False):
+def dgswp(x, y, model, opt, 
+          n_iter=1000, epsilon_Stein=5e-2, n_samples_Stein=10, 
+          roll_back=False, variance_reduction=True, 
+          log_wass_loss=True, device="cpu"):
+    mem_loss_inner = []
+    mem_params = []
+    log_losses = []
     for i in range(n_iter):
         opt.zero_grad()
-        loss = F_eps(model, x, y, fun=F_module, 
-                     n_samples=n_samples_Stein, epsilon=epsilon_Stein)
+        loss = H_eps(model, x, y, fun=H_module, 
+                     n_samples=n_samples_Stein, epsilon=epsilon_Stein, 
+                     variance_reduction=variance_reduction, device=device)
+        if roll_back:
+            mem_loss_inner.append(loss.item())
+            mem_params.append(model.state_dict())
+        if log_wass_loss:
+            with torch.no_grad():
+                log_losses.append(float(H_module(x, y, model)))
+        else:
+            log_losses.append(loss.item())
         loss.backward()
-        if log and i % 100 == 0:
-            print(f"swgg log loss={loss.item():.3f}")
         opt.step()
+    if n_iter > 0 and roll_back:
+        model.load_state_dict(mem_params[np.argmin(mem_loss_inner)])
+    return log_losses
 

@@ -29,6 +29,25 @@ def data_gen(n_samples_per_distrib, d, name, random_state=0):
         cov_s = make_spd_matrix(d, random_state=rng)
         target = rng.multivariate_normal(mu_s, cov_s, n_samples_per_distrib)
         source = 2.5 * (rng.rand(n_samples_per_distrib, d) - .5) + 1.
+    elif name == '8gaussians':
+        # Inspired from https://github.com/caogang/wgan-gp
+        scale = 2.
+        centers = [
+            (1, 0), (-1, 0), (0, 1), (0, -1),
+            (1. / np.sqrt(2), 1. / np.sqrt(2)), (1. / np.sqrt(2), -1. / np.sqrt(2)),
+            (-1. / np.sqrt(2), 1. / np.sqrt(2)), (-1. / np.sqrt(2), -1. / np.sqrt(2))
+        ]
+        centers = [(scale * x, scale * y) for x, y in centers]
+        temp = []
+        for i in range(n_samples_per_distrib):
+            point = rng.randn(2) * .02
+            center = centers[rng.choice(np.arange(len(centers)))]
+            point[0] += center[0]
+            point[1] += center[1]
+            temp.append(point)
+        target = np.array(temp, dtype='float32')
+        target /= 1.414  # stdev
+        source = 2.5 * (rng.rand(n_samples_per_distrib, d) - .5) + 1.
     return source, target
 
 

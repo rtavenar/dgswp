@@ -4,9 +4,9 @@ import torch
 import ot
 from abc import ABC, abstractmethod
 
-from losses import F_eps
+from losses import H_eps, H_module
 
-torch.manual_seed(0)
+# torch.manual_seed(0)
 
 def wass(x, y):
     dists = ot.utils.dist(x, y)
@@ -14,18 +14,14 @@ def wass(x, y):
     b = torch.ones(y.shape[0])/y.shape[0]
     return ot.emd2(a, b, dists)
 
-def F_nn(x, y, model, p):
-    pos_x_1d = torch.argsort(model(x).flatten())
-    pos_y_1d = torch.argsort(model(y).flatten())
-    return torch.mean(torch.sum(torch.abs(x[pos_x_1d] - y[pos_y_1d]) ** p, dim=-1), dim=0)
-
-F_nn_sqeuc = lambda x, y, model: F_nn(x, y, model, p=2)
-
 
 class GradientFlow(ABC):
     def __init__(self, learning_rate_flow, n_iter_flow):
         self.learning_rate_flow = learning_rate_flow
         self.n_iter_flow = n_iter_flow
+    
+    def init(self):
+        pass  # Default: nothing to init when nothing is learned
 
     def inner_fit(self, source, target):
         # Only useful for methods that will **optimize** an inner model
@@ -54,7 +50,7 @@ class GradientFlow(ABC):
             losses_wass.append(wass(source, target).detach().numpy())
         return sources, losses, losses_wass
 
-class GeneralizedSWGGGradientFlow(GradientFlow):
+class DifferentiableGeneralizedWassersteinPlanGradientFlow(GradientFlow):
     def __init__(self, learning_rate_flow, n_iter_flow, model, 
                  n_iter_inner, learning_rate_inner=.01, epsilon=5e-2, n_samples_stein=10):
         super().__init__(learning_rate_flow, n_iter_flow)
@@ -67,12 +63,17 @@ class GeneralizedSWGGGradientFlow(GradientFlow):
         self.n_iter_inner = n_iter_inner
         self.opt_model = Adam(self.model.parameters(), lr=self.learning_rate_inner)
     
+    def init(self):
+        if hasattr(self.model, "init"):
+            self.model.init()
+        self.opt_model = Adam(self.model.parameters(), lr=self.learning_rate_inner)
+    
     def inner_fit(self, source, target):
         mem_loss_inner = []
         mem_params = []
         for _ in range(self.n_iter_inner):
-            loss = F_eps(self.model, source, target, 
-                         fun=F_nn_sqeuc, n_samples=self.n_samples, 
+            loss = H_eps(self.model, source, target, 
+                         fun=H_module, n_samples=self.n_samples, 
                          epsilon=self.epsilon)
             mem_loss_inner.append(loss.item())
             mem_params.append(self.model.state_dict())
@@ -82,7 +83,7 @@ class GeneralizedSWGGGradientFlow(GradientFlow):
         self.model.load_state_dict(mem_params[np.argmin(mem_loss_inner)])
 
     def forward(self, source, target):
-        return F_nn_sqeuc(source, target, self.model)
+        return H_module(source, target, self.model)
 
 class SlicedWassersteinGradientFlow(GradientFlow):
     def __init__(self, learning_rate_flow, n_iter_flow, n_directions):
@@ -101,10 +102,13 @@ class MaxSlicedWassersteinGradientFlow(GradientFlow):
         super().__init__(learning_rate_flow, n_iter_flow)
         self.n_iter_inner = n_iter_inner
         self.learning_rate_inner = learning_rate_inner
-        self.theta_ = torch.randn(d, dtype=torch.float32, requires_grad=False)
+        self.d = d
+    
+    def init(self):
+        self.theta_ = torch.randn(self.d, dtype=torch.float32, requires_grad=False)
         self.theta_ /= torch.norm(self.theta_, p=2)
         self.theta_.requires_grad_()
-        self.opt_inner = Adam([self.theta_], lr=self.learning_rate_inner)
+        self.opt_inner = Adam([self.theta_], lr=self.learning_rate_inner)    
 
     def inner_fit(self, source, target):
         for _ in range(self.n_iter_inner):
@@ -118,7 +122,7 @@ class MaxSlicedWassersteinGradientFlow(GradientFlow):
         ordered_targets = torch.sort(self.theta_ @ target.T, dim=-1)[0]  # n, 
         return torch.mean(torch.abs(ordered_sources - ordered_targets) ** 2)
 
-class UnOptimizedSWGGGradientFlow(GradientFlow):
+class RandomSearchSWGGGradientFlow(GradientFlow):
     def __init__(self, learning_rate_flow, n_iter_flow, n_directions):
         super().__init__(learning_rate_flow, n_iter_flow)
         self.n_directions = n_directions
@@ -140,13 +144,18 @@ class SWGGGradientFlow(GradientFlow):
         self.s = s
         self.epsilon = epsilon
         self.device = device
-        self.theta_ = torch.randn(d, dtype=torch.float32, requires_grad=False)
+        self.d = d
+    
+    def init(self):
+        self.theta_ = torch.randn(self.d, dtype=torch.float32, requires_grad=False)
         self.theta_ /= torch.norm(self.theta_, p=2)
         self.theta_.requires_grad_()
-        self.opt_inner = Adam([self.theta_], lr=self.learning_rate_inner)
+        self.opt_inner = Adam([self.theta_], lr=self.learning_rate_inner)    
 
     def inner_fit(self, source, target):
         for _ in range(self.n_iter_inner):
+            with torch.no_grad():
+                self.theta_ /= torch.norm(self.theta_, p=2)
             loss = self.forward(source, target, s=self.s, epsilon=self.epsilon)
             loss.backward()
             self.opt_inner.step()
@@ -178,7 +187,6 @@ class SWGGGradientFlow(GradientFlow):
         
         X_line_extend_blur_sort,u_b=torch.sort(X_line_extend_blur,axis=0)
         Y_line_extend_blur_sort,v_b=torch.sort(Y_line_extend_blur,axis=0)
-
         
         X_extend=X_sort.repeat_interleave(s,dim=0)
         Y_extend=Y_sort.repeat_interleave(s,dim=0)
@@ -202,6 +210,11 @@ class AugmentedSlicedWassersteinGradientFlow(GradientFlow):
         self.learning_rate_inner = learning_rate_inner
         self.model = model
         self.n_iter_inner = n_iter_inner
+        self.opt_model = Adam(self.model.parameters(), lr=self.learning_rate_inner)
+    
+    def init(self):
+        if hasattr(self.model, "init"):
+            self.model.init()
         self.opt_model = Adam(self.model.parameters(), lr=self.learning_rate_inner)
     
     def inner_fit(self, source, target):
