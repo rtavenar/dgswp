@@ -3,10 +3,6 @@ import numpy as np
 import torch
 import ot
 from abc import ABC, abstractmethod
-from lib_hyp.utils_hyperbolic import *
-from  geoopt.optim import RiemannianAdam, RiemannianSGD
-import geoopt
-import matplotlib.pyplot as plt
 
 from losses import H_eps, H_module
 
@@ -83,13 +79,11 @@ class DifferentiableGeneralizedWassersteinPlanGradientFlow(GradientFlow):
                          epsilon=self.epsilon)
             mem_loss_inner.append(loss.item())
             mem_params.append(self.model.state_dict())
-            #print(mem_params[-1])
             loss.backward()
             self.opt_model.step()
             self.opt_model.zero_grad()
         self.model.load_state_dict(mem_params[np.argmin(mem_loss_inner)])
-        #plt.plot(mem_loss_inner)
-        #plt.show()
+
 
     def forward(self, source, target):
         return H_module(source, target, self.model)
