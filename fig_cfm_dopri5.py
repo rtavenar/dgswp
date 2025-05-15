@@ -36,14 +36,13 @@ model_colors = {
 # Plot lines for each model/integrator combination
 for model in df['Model'].unique():
     for integrator in df['Integrator'].unique():
-        linestyle = '-' if 'DoPri5' in integrator else '--'
-        if linestyle == "--":
+        if 'DoPri5' not in integrator:
             continue
         sub_df = df[(df['Model'] == model) & (df['Integrator'] == integrator)]
         # Group by step to average over runs
         grouped = sub_df.groupby('Step')['FID'].mean()
         plt.plot(grouped.index, grouped.values, label=model,
-                 color=model_colors[model], linestyle=linestyle)
+                 color=model_colors[model])
 
 plt.xlabel('Training Step')
 plt.ylabel('FID')
