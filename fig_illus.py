@@ -49,7 +49,6 @@ def eight_normal_sample(n, dim, scale=1, var=1):
     ]
     centers = torch.tensor(centers) * scale
     noise = m.sample((n,))
-    #multi = torch.multinomial(torch.ones(8), n, replacement=True)
     multi = torch.zeros(n//8, dtype=torch.int8)
     for i in range(1,8):
         multi = torch.cat((multi, i*torch.ones(n//8, dtype=torch.int8)))
@@ -115,11 +114,11 @@ x1_plot_swgg = y[indices_y].detach().numpy()
 # min-DGSWP
 torch.manual_seed(1)
 model = MLP(input_dim=dim)
-optimizer = torch.optim.SGD(model.parameters(), lr=.2)  #torch.optim.Adam(model.parameters(), lr=1e-2)
+optimizer = torch.optim.SGD(model.parameters(), lr=.2)
 
 dgswp(
     x, y, model, optimizer, n_iter=n_iter,
-    log=False, roll_back=True, variance_reduction=True,
+    roll_back=True, variance_reduction=True,
     n_samples_Stein=n_samples_Stein, epsilon_Stein=epsilon_Stein
 )
 indices_x = torch.argsort(model(x).flatten())
