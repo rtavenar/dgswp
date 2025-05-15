@@ -4,27 +4,24 @@ import torch
 from torch.distributions.normal import Normal
 
 def sample_noise_with_gradients(n_samples, shape, normalize=False):
-    """Samples a noise tensor from N(0,1) with its gradient.
+    """Samples noise from a standard normal distribution along with its gradient.
 
     Args:
-    n_samples: int, the number of samples to be drawn.
-    shape: torch.tensor<int>, the tensor shape of each sample.
+        n_samples (int): Number of noise samples to draw.
+        shape (torch.Size or list): Shape of each noise sample.
+        normalize (bool, optional): If True, normalizes the noise for the case of Busemann maps.
 
     Returns:
-    A tuple Tensor<float>[[n_samples+1, *shape]], Tensor<float>[[n_samples+1, *shape]] 
-    that corresponds to the
-    sampled noise and the gradient of log the underlying probability
-    distribution function. In practice, for the N(0,1) distribution, the
-    gradient is equal to the noise itself.
-    The first element in this tensor is always the zero element that can later be used
-    for variance reduction.
+        Tuple[torch.Tensor, torch.Tensor]: A tuple containing:
+            - all_samples (Tensor): Noise tensor of shape (n_samples + 1, *shape), with the first element being zero.
+            - gradients (Tensor): Gradients, equal to the noise tensor in the case of N(0, 1).
     """
     actual_shape = [n_samples] + list(shape)
     sampler = Normal(0.0, 1.0)
     samples = sampler.sample(actual_shape)
     first_sample = torch.zeros(shape)
     if normalize:
-        samples[:,:-1] /= torch.norm(samples[:,:-1], dim=-1, keepdim=True)**2
+        samples[:, :-1] /= torch.norm(samples[:,:-1], dim=-1, keepdim=True) ** 2
 
     all_samples = torch.cat((first_sample.unsqueeze(0), samples), dim=0)
     gradients = all_samples
@@ -32,36 +29,82 @@ def sample_noise_with_gradients(n_samples, shape, normalize=False):
     return all_samples, gradients
 
 def H_linear(x, y, theta, p=2):
+    """Computes a linear version of our $h$ function (cf. paper) along a projection theta.
+
+    Args:
+        x (torch.Tensor): First distribution sample.
+        y (torch.Tensor): Second distribution sample.
+        theta (torch.Tensor): Projection direction.
+        p (int, optional): Power used in the distance calculation. Defaults to 2.
+
+    Returns:
+        torch.Tensor: Computed distance.
+    """
     pos_x_1d = torch.argsort(theta @ x.T)
     pos_y_1d = torch.argsort(theta @ y.T)
     return torch.mean(torch.sum(torch.abs(x[pos_x_1d] - y[pos_y_1d]) ** p, dim=-1), dim=0)
 
 def H_module(x, y, model, p=2):
+    """Computes the model-based variant our $h$ function (cf. paper).
+
+    Args:
+        x (torch.Tensor): First distribution sample.
+        y (torch.Tensor): Second distribution sample.
+        model (nn.Module): A model that defines the projection.
+        p (int, optional): Power used in the distance calculation. Defaults to 2.
+
+    Returns:
+        torch.Tensor: Computed distance.
+    """
     pos_x_1d = torch.argsort(model(x).flatten())
     pos_y_1d = torch.argsort(model(y).flatten())
     return torch.mean(torch.sum(torch.abs(x[pos_x_1d] - y[pos_y_1d]) ** p, dim=-1), dim=0)
 
-
 def H_batch(thetas, x, y, fun=None):
+    """Computes distances for a batch of projection directions or models.
+
+    Args:
+        thetas (list or torch.Tensor): A list of projection directions or models.
+        x (torch.Tensor): First distribution sample.
+        y (torch.Tensor): Second distribution sample.
+        fun (callable, optional): Distance function $h$ to use. Defaults to `H_linear`.
+
+    Returns:
+        torch.Tensor: Batch of distances.
+    """
     if fun is None:
         fun = H_linear
     return torch.tensor([fun(x, y, theta) for theta in thetas], requires_grad=True)
 
 class H_epsilon_linear(torch.autograd.Function):
+    """Custom autograd function for computing $h_\\varepsilon$ (cf. paper) 
+       for a projection direction $\\theta$ (linear case).
+    """
+    
     @staticmethod
     def forward(ctx, theta, x, y, fun, n_samples, epsilon, variance_reduction, device):
+        """Forward pass for linear $h_\\varepsilon$ computation.
+
+        Args:
+            ctx: Context to save information for the backward pass.
+            theta (torch.Tensor): Projection direction.
+            x (torch.Tensor): First distribution sample.
+            y (torch.Tensor): Second distribution sample.
+            fun (callable): Distance function $h$.
+            n_samples (int): Number of samples for gradient estimation (parameter $N$).
+            epsilon (float): Noise scale (parameter $\\varepsilon$).
+            variance_reduction (bool): Whether to apply variance reduction.
+            device (str): Torch device.
+
+        Returns:
+            torch.Tensor: Mean perturbed output.
         """
-        In the forward pass we receive a Tensor containing the input and return
-        a Tensor containing the output. ctx is a context object that can be used
-        to stash information for backward computation. You can cache arbitrary
-        objects for use in the backward pass using the ctx.save_for_backward method.
-        """
-        input_shape = theta.shape  # [D, ]
+        input_shape = theta.shape
         additive_noise, noise_gradient = sample_noise_with_gradients(n_samples, input_shape)
         additive_noise = additive_noise.to(device)
-        noise_gradient = noise_gradient.to(device)  # [N+1, D]
-        perturbed_input = theta + epsilon * additive_noise  # [N+1, D]
-        perturbed_output = H_batch(perturbed_input, x, y, fun).to(device)  # [N+1, ]
+        noise_gradient = noise_gradient.to(device)
+        perturbed_input = theta + epsilon * additive_noise
+        perturbed_output = H_batch(perturbed_input, x, y, fun).to(device)
 
         ctx.save_for_backward(perturbed_output, noise_gradient, torch.tensor(epsilon))
         ctx.variance_reduction = variance_reduction
@@ -69,51 +112,65 @@ class H_epsilon_linear(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        """
-        In the backward pass we receive a Tensor containing the gradient of the loss
-        with respect to the output, and we need to compute the gradient of the loss
-        with respect to the input.
+        """Backward pass computing gradients with respect to theta.
+
+        Args:
+            grad_output (torch.Tensor): Gradient of loss w.r.t. output.
+
+        Returns:
+            Tuple: Gradient w.r.t. theta and None for the other inputs.
         """
         perturbed_output, noise_gradient, epsilon = ctx.saved_tensors
-
-        F0 = perturbed_output[0]
+        H0 = perturbed_output[0]
         if ctx.variance_reduction:
-            F_minus_F0 = grad_output * (perturbed_output[1:] - F0)
+            H_minus_H0 = grad_output * (perturbed_output[1:] - H0)
         else:
-            F_minus_F0 = grad_output * perturbed_output[1:]
-        F_minus_F0_reshaped = F_minus_F0
-        for _ in range(len(noise_gradient.shape) - 1):
-            F_minus_F0_reshaped = F_minus_F0_reshaped.unsqueeze(1)
+            H_minus_H0 = grad_output * perturbed_output[1:]
 
-        grad_theta = F_minus_F0_reshaped * noise_gradient[1:] / epsilon
-        
+        H_minus_H0_reshaped = H_minus_H0
+        for _ in range(len(noise_gradient.shape) - 1):
+            H_minus_H0_reshaped = H_minus_H0_reshaped.unsqueeze(1)
+
+        grad_theta = H_minus_H0_reshaped * noise_gradient[1:] / epsilon
         return torch.mean(grad_theta, dim=0), None, None, None, None, None, None, None
 
 class H_epsilon_module(torch.autograd.Function):
+    """Custom autograd function for computing $h_\\varepsilon$ (cf. paper) 
+       in the case of a torch.nn.Module.
+    """
+
     @staticmethod
     def forward(ctx, module, x, y, fun, n_samples, epsilon, variance_reduction, device):
-        """
-        In the forward pass we receive a Tensor containing the input and return
-        a Tensor containing the output. ctx is a context object that can be used
-        to stash information for backward computation. You can cache arbitrary
-        objects for use in the backward pass using the ctx.save_for_backward method.
-        """
-        normalize = False
-        if str(module) == "BusemannMap()":  
-            normalize = True
+        """Forward pass for module-based $h_\\varepsilon$ computation.
 
-        perturbed_modules = [copy.deepcopy(module) for _ in range(n_samples + 1)]  # list of N+1 models
-        noise_gradients = []  # list of len(module.parameters()) noise gradients
+        Args:
+            ctx: Context for storing tensors.
+            module (nn.Module): Module parameterized function.
+            x (torch.Tensor): First input distribution.
+            y (torch.Tensor): Second input distribution.
+            fun (callable): Distance function $h$.
+            n_samples (int): Number of samples for gradient estimation (parameter $N$).
+            epsilon (float): Noise scale (parameter $\\varepsilon$).
+            variance_reduction (bool): Whether to apply variance reduction.
+            device (str): Torch device.
+
+        Returns:
+            torch.Tensor: Mean perturbed output.
+        """
+        normalize = True if str(module) == "BusemannMap()" else False
+
+        perturbed_modules = [copy.deepcopy(module) for _ in range(n_samples + 1)]
+        noise_gradients = []
         module_parameters = list(module.parameters())
         for i_param in range(len(module_parameters)):
-            input_shape = module_parameters[i_param].shape  # [D, ] or multidim, whatever
+            input_shape = module_parameters[i_param].shape
             additive_noise, noise_gradient = sample_noise_with_gradients(n_samples, input_shape, normalize)
             additive_noise = additive_noise.to(device)
-            noise_gradient = noise_gradient.to(device)  # [N+1, D]
+            noise_gradient = noise_gradient.to(device)
             for idx_m, m in enumerate(perturbed_modules):
                 list(m.parameters())[i_param] += epsilon * additive_noise[idx_m]
             noise_gradients.append(noise_gradient)
-        perturbed_output = H_batch(perturbed_modules, x, y, fun).to(device)  # [N+1, ]
+        perturbed_output = H_batch(perturbed_modules, x, y, fun).to(device)
 
         ctx.save_for_backward(perturbed_output, *noise_gradients, torch.tensor(epsilon))
         ctx.module = module
@@ -122,10 +179,13 @@ class H_epsilon_module(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        """
-        In the backward pass we receive a Tensor containing the gradient of the loss
-        with respect to the output, and we need to compute the gradient of the loss
-        with respect to the input.
+        """Backward pass computing gradients w.r.t. module parameters.
+
+        Args:
+            grad_output (torch.Tensor): Gradient of the output.
+
+        Returns:
+            Tuple: Gradients for module parameters and None for other inputs.
         """
         tensors = ctx.saved_tensors
         perturbed_output = tensors[0]
@@ -133,53 +193,43 @@ class H_epsilon_module(torch.autograd.Function):
         epsilon = tensors[-1]
         module = ctx.module
 
-        F0 = perturbed_output[0]
+        H0 = perturbed_output[0]
         if ctx.variance_reduction:
-            F_minus_F0 = grad_output * (perturbed_output[1:] - F0)
+            H_minus_H0 = grad_output * (perturbed_output[1:] - H0)
         else:
-            F_minus_F0 = grad_output * perturbed_output[1:]
+            H_minus_H0 = grad_output * perturbed_output[1:]
+
         module_parameters = list(module.parameters())
         for i_param in range(len(module_parameters)):
             noise_gradient = noise_gradients[i_param]
-            F_minus_F0_reshaped = F_minus_F0
+            H_minus_H0_reshaped = H_minus_H0
             for _ in range(len(noise_gradient.shape) - 1):
-                F_minus_F0_reshaped = F_minus_F0_reshaped.unsqueeze(1)
-            grad_theta = F_minus_F0_reshaped * noise_gradient[1:] / epsilon
+                H_minus_H0_reshaped = H_minus_H0_reshaped.unsqueeze(1)
+            grad_theta = H_minus_H0_reshaped * noise_gradient[1:] / epsilon
             if module_parameters[i_param].grad is None:
                 module_parameters[i_param].grad = torch.mean(grad_theta, dim=0)
             else:
                 module_parameters[i_param].grad += torch.mean(grad_theta, dim=0)
-        
+
         return None, None, None, None, None, None, None, None
-        
 
 def H_eps(theta, x, y, fun, n_samples, epsilon, variance_reduction=True, device="cpu"):
-    """
-    This is the main function to be used for $H_\varepsilon$ computation.
-    
-    Arguments
-    ---------
+    """Main entry point for computing $h_\\varepsilon$ either with a vector or a module.
 
-    theta: torch.tensor with requires_grad=True or torch.nn.Module
-        Parameter(s) to be optimized
+    Args:
+        theta (Union[torch.Tensor, nn.Module]): Parameters (vector or module).
+        x (torch.Tensor): First input distribution.
+        y (torch.Tensor): Second input distribution.
+        fun (callable): Function $h$.
+        n_samples (int): Number of samples for gradient estimation (parameter $N$).
+        epsilon (float): Noise scale (parameter $\\varepsilon$).
+        variance_reduction (bool, optional): Whether to apply variance reduction. Defaults to True.
+        device (str, optional): Device to run computations on. Defaults to "cpu".
 
-    x, y: torch.tensor s
-        Input distributions in full dimension
-    
-    fun: function that takes x, y, theta as input
-        Our $h$ function (operating on a single theta, be it a tensor of parameters or a module)
-
-    n_samples: int
-        Number of samples to be drawn for the Stein lemma's approximation of the gradient
-    
-    epsilon: float
-        Standard deviation for the normal law to be used in the Stein lemma's approximation of the gradient
-    
-    device: str, default "cpu"
-        Device to run torch operations on
+    Returns:
+        torch.Tensor: Estimated $h_\\varepsilon$ value.
     """
     if isinstance(theta, torch.nn.Module):
-        # Ugly hack, not sure why we need that :(
         requires_grad = x.requires_grad
         x.requires_grad_()
         ret = H_epsilon_module.apply(theta, x, y, fun, n_samples, epsilon, variance_reduction, device)
@@ -188,11 +238,28 @@ def H_eps(theta, x, y, fun, n_samples, epsilon, variance_reduction=True, device=
     else:
         return H_epsilon_linear.apply(theta, x, y, fun, n_samples, epsilon, variance_reduction, device)
 
-
 def dgswp(x, y, model, opt, 
           n_iter=1000, epsilon_Stein=5e-2, n_samples_Stein=10, 
           roll_back=False, variance_reduction=True, 
           log_wass_loss=True, device="cpu"):
+    """Performs training using gradient flow on the sliced Wasserstein potential.
+
+    Args:
+        x (torch.Tensor): First input distribution.
+        y (torch.Tensor): Second input distribution.
+        model (torch.nn.Module): Model to optimize.
+        opt (torch.optim.Optimizer): Optimizer.
+        n_iter (int, optional): Number of iterations. Defaults to 1000.
+        epsilon_Stein (float, optional): Noise scale for Stein gradient. Defaults to 5e-2.
+        n_samples_Stein (int, optional): Number of noise samples. Defaults to 10.
+        roll_back (bool, optional): If True, reverts to the best model parameters. Defaults to False.
+        variance_reduction (bool, optional): Enables variance reduction in gradient estimates. Defaults to True.
+        log_wass_loss (bool, optional): If True, logs Wasserstein loss instead of surrogate. Defaults to True.
+        device (str, optional): Device for computation. Defaults to "cpu".
+
+    Returns:
+        List[float]: Log of loss values across iterations.
+    """
     mem_loss_inner = []
     mem_params = []
     log_losses = []
@@ -214,4 +281,3 @@ def dgswp(x, y, model, opt,
     if n_iter > 0 and roll_back:
         model.load_state_dict(mem_params[np.argmin(mem_loss_inner)])
     return log_losses
-

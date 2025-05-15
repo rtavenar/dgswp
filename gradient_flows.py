@@ -6,33 +6,78 @@ from abc import ABC, abstractmethod
 
 from losses import H_eps, H_module
 
-# torch.manual_seed(0)
-
 def wass(x, y):
+    """
+    Computes the squared Wasserstein distance between two point clouds x and y
+    using the Earth Mover's Distance (EMD) implementation from the POT library.
+
+    Args:
+        x (Tensor): Source samples of shape (n, d).
+        y (Tensor): Target samples of shape (m, d).
+
+    Returns:
+        float: The squared Wasserstein distance between x and y.
+    """
     dists = ot.utils.dist(x, y)
     a = torch.ones(x.shape[0])/x.shape[0]
     b = torch.ones(y.shape[0])/y.shape[0]
     return ot.emd2(a, b, dists)
 
-
 class GradientFlow(ABC):
+    """
+    Abstract base class for gradient flow-based optimization over distributions.
+    """
     def __init__(self, learning_rate_flow, n_iter_flow):
+        """
+        Initializes the gradient flow parameters.
+
+        Args:
+            learning_rate_flow (float): Learning rate for the gradient flow.
+            n_iter_flow (int): Number of iterations for the gradient flow.
+        """
         self.learning_rate_flow = learning_rate_flow
         self.n_iter_flow = n_iter_flow
     
     def init(self):
-        pass  # Default: nothing to init when nothing is learned
+        """
+        Optional initialization method for subclasses.
+        """
+        pass
 
     def inner_fit(self, source, target):
-        # Only useful for methods that will **optimize** an inner model
-        # eg. useless for Sliced Wass or SWGG without optim
+        """
+        Optional inner-loop optimization for learning additional parameters
+        (e.g., neural networks). Default: no-op.
+        """
         pass
 
     @abstractmethod
     def forward(self, source, target):
+        """
+        Computes the loss function to drive the gradient flow.
+
+        Args:
+            source (Tensor): Source distribution samples.
+            target (Tensor): Target distribution samples.
+
+        Returns:
+            Tensor: Loss value.
+        """
         raise NotImplementedError
 
     def fit(self, source, target):
+        """
+        Applies gradient flow to move source towards target distribution.
+
+        Args:
+            source (Tensor): Initial source distribution.
+            target (Tensor): Target distribution.
+
+        Returns:
+            sources (list): Sequence of source positions.
+            losses (list): List of objective values.
+            losses_wass (list): List of true Wasserstein distances to target.
+        """
         losses = []
         losses_wass = []
         source = torch.tensor(source.clone().detach().numpy(), 
@@ -51,24 +96,39 @@ class GradientFlow(ABC):
         return sources, losses, losses_wass
 
 class DifferentiableGeneralizedWassersteinPlanGradientFlow(GradientFlow):
+    """
+    Implements a gradient flow using a learned transport plan via a neural network model.
+    """
     def __init__(self, learning_rate_flow, n_iter_flow, model, 
                  n_iter_inner, learning_rate_inner=0.1, epsilon=5e-2, n_samples_stein=10):
+        """
+        Args:
+            model (nn.Module): Neural transport model.
+            n_iter_inner (int): Inner-loop optimization steps for model.
+            learning_rate_inner (float): Learning rate for model training.
+            epsilon (float): Noise scale (parameter $\\varepsilon$).
+            n_samples_stein (int): Number of samples for gradient estimation (parameter $N$).
+        """
         super().__init__(learning_rate_flow, n_iter_flow)
-
         self.epsilon = epsilon
         self.n_samples = n_samples_stein
         self.learning_rate_inner = learning_rate_inner
-
         self.model = model
         self.n_iter_inner = n_iter_inner
         self.opt_model = Adam(self.model.parameters(), lr=self.learning_rate_inner)
     
     def init(self):
+        """
+        Initializes the model optimizer and optionally the model.
+        """
         if hasattr(self.model, "init"):
             self.model.init()
         self.opt_model = Adam(self.model.parameters(), lr=self.learning_rate_inner)
     
     def inner_fit(self, source, target):
+        """
+        Optimizes the projection model using the $h_\\varepsilon$ loss.
+        """
         target = target.type(torch.float64) 
         source = source.type(torch.float64)
         mem_loss_inner = []
@@ -84,23 +144,34 @@ class DifferentiableGeneralizedWassersteinPlanGradientFlow(GradientFlow):
             self.opt_model.zero_grad()
         self.model.load_state_dict(mem_params[np.argmin(mem_loss_inner)])
 
-
     def forward(self, source, target):
+        """
+        Computes the non-perturbed loss $h$ using the learned projection model.
+        """
         return H_module(source, target, self.model)
 
 class SlicedWassersteinGradientFlow(GradientFlow):
+    """
+    Implements sliced Wasserstein gradient flow using random projections.
+    """
     def __init__(self, learning_rate_flow, n_iter_flow, n_directions):
         super().__init__(learning_rate_flow, n_iter_flow)
         self.n_directions = n_directions
 
     def forward(self, source, target):
+        """
+        Computes the average sliced Wasserstein loss across random directions.
+        """
         directions = torch.randn((self.n_directions, source.shape[1]), requires_grad=False)
         directions /= torch.norm(directions, dim=-1, keepdim=True)
-        ordered_sources = torch.sort(directions @ source.T, dim=-1)[0]  # n_dir, n
-        ordered_targets = torch.sort(directions @ target.T, dim=-1)[0]  # n_dir, n
+        ordered_sources = torch.sort(directions @ source.T, dim=-1)[0]
+        ordered_targets = torch.sort(directions @ target.T, dim=-1)[0]
         return torch.mean(torch.abs(ordered_sources - ordered_targets) ** 2)
 
 class MaxSlicedWassersteinGradientFlow(GradientFlow):
+    """
+    Gradient flow using the maximum sliced Wasserstein direction.
+    """
     def __init__(self, learning_rate_flow, n_iter_flow, d, n_iter_inner, learning_rate_inner):
         super().__init__(learning_rate_flow, n_iter_flow)
         self.n_iter_inner = n_iter_inner
@@ -108,12 +179,18 @@ class MaxSlicedWassersteinGradientFlow(GradientFlow):
         self.d = d
     
     def init(self):
+        """
+        Initializes a direction vector for inner-loop maximization.
+        """
         self.theta_ = torch.randn(self.d, dtype=torch.float32, requires_grad=False)
         self.theta_ /= torch.norm(self.theta_, p=2)
         self.theta_.requires_grad_()
-        self.opt_inner = Adam([self.theta_], lr=self.learning_rate_inner)    
+        self.opt_inner = Adam([self.theta_], lr=self.learning_rate_inner)
 
     def inner_fit(self, source, target):
+        """
+        Optimizes the projection direction to maximize the sliced Wasserstein distance.
+        """
         for _ in range(self.n_iter_inner):
             loss = - self.forward(source, target)
             loss.backward()
@@ -121,24 +198,35 @@ class MaxSlicedWassersteinGradientFlow(GradientFlow):
             self.opt_inner.zero_grad()
 
     def forward(self, source, target):
-        ordered_sources = torch.sort(self.theta_ @ source.T, dim=-1)[0]  # n, 
-        ordered_targets = torch.sort(self.theta_ @ target.T, dim=-1)[0]  # n, 
+        """
+        Computes the sliced Wasserstein loss in the optimized direction.
+        """
+        ordered_sources = torch.sort(self.theta_ @ source.T, dim=-1)[0]
+        ordered_targets = torch.sort(self.theta_ @ target.T, dim=-1)[0]
         return torch.mean(torch.abs(ordered_sources - ordered_targets) ** 2)
 
 class RandomSearchSWGGGradientFlow(GradientFlow):
+    """
+    Uses random directions and Greedy Gaussian slicing for gradient flow.
+    """
     def __init__(self, learning_rate_flow, n_iter_flow, n_directions):
         super().__init__(learning_rate_flow, n_iter_flow)
         self.n_directions = n_directions
 
     def forward(self, source, target):
+        """
+        Computes a sliced loss using random directions and returns the best.
+        """
         directions = torch.randn((self.n_directions, source.shape[1]), requires_grad=False)
         directions /= torch.norm(directions, dim=-1, keepdim=True)
-        ordered_sources = source[torch.argsort(directions @ source.T, dim=-1)]  # n_dir, n, d
-        ordered_targets = target[torch.argsort(directions @ target.T, dim=-1)]  # n_dir, n, d
+        ordered_sources = source[torch.argsort(directions @ source.T, dim=-1)]
+        ordered_targets = target[torch.argsort(directions @ target.T, dim=-1)]
         return torch.min(torch.mean(torch.sum(torch.abs(ordered_sources - ordered_targets) ** 2, dim=2), dim=1))
 
-
 class SWGGGradientFlow(GradientFlow):
+    """
+    SWGG Gradient Flow (optimized version).
+    """
     def __init__(self, learning_rate_flow, n_iter_flow, 
                  n_iter_inner, learning_rate_inner, d,
                  s=10, epsilon=.5, device="cpu"):
@@ -151,12 +239,18 @@ class SWGGGradientFlow(GradientFlow):
         self.d = d
     
     def init(self):
+        """
+        Initializes the direction vector and optimizer for slicing.
+        """
         self.theta_ = torch.randn(self.d, dtype=torch.float32, requires_grad=False)
         self.theta_ /= torch.norm(self.theta_, p=2)
         self.theta_.requires_grad_()
-        self.opt_inner = Adam([self.theta_], lr=self.learning_rate_inner)    
+        self.opt_inner = Adam([self.theta_], lr=self.learning_rate_inner)
 
     def inner_fit(self, source, target):
+        """
+        Optimizes the slicing direction using the SWGG objective.
+        """
         for _ in range(self.n_iter_inner):
             with torch.no_grad():
                 self.theta_ /= torch.norm(self.theta_, p=2)
@@ -165,8 +259,17 @@ class SWGGGradientFlow(GradientFlow):
             self.opt_inner.step()
             self.opt_inner.zero_grad()
 
-
     def forward(self, source, target, s=1, epsilon=0.):
+        """
+        Computes the SWGG loss.
+
+        Args:
+            s (int): Number of repetitions for Gaussian blurring.
+            epsilon (float): Blur intensity.
+
+        Returns:
+            Tensor: The SWGG loss.
+        """
         n,dim=source.shape
         
         X_line=torch.matmul(source, self.theta_)
@@ -203,25 +306,32 @@ class SWGGGradientFlow(GradientFlow):
         W_baryZ=torch.sum((bary_blur-Z)**2)/n
         return -4*W_baryZ+2*W_XZ+2*W_YZ
 
-
 class AugmentedSlicedWassersteinGradientFlow(GradientFlow):
+    """
+    Augmented sliced Wasserstein flow with a learned feature transformation.
+    """
     def __init__(self, learning_rate_flow, n_iter_flow, n_directions, model, lambda_,
                  learning_rate_inner=.01, n_iter_inner=10):
         super().__init__(learning_rate_flow, n_iter_flow)
         self.n_directions = n_directions
         self.lambda_ = lambda_
-
         self.learning_rate_inner = learning_rate_inner
         self.model = model
         self.n_iter_inner = n_iter_inner
         self.opt_model = Adam(self.model.parameters(), lr=self.learning_rate_inner)
     
     def init(self):
+        """
+        Initializes the model and its optimizer.
+        """
         if hasattr(self.model, "init"):
             self.model.init()
         self.opt_model = Adam(self.model.parameters(), lr=self.learning_rate_inner)
     
     def inner_fit(self, source, target):
+        """
+        Optimizes the transformation model to minimize augmented SW loss.
+        """
         for _ in range(self.n_iter_inner):
             loss_sw, m_source, m_target = self._forward(source, target)
             reg = self.lambda_ * torch.mean(torch.norm(m_source, p=2, dim=1)
@@ -232,13 +342,22 @@ class AugmentedSlicedWassersteinGradientFlow(GradientFlow):
             self.opt_model.zero_grad()
 
     def _forward(self, source, target):
+        """
+        Projects source and target using the model and computes SW distance.
+
+        Returns:
+            Tuple[Tensor, Tensor, Tensor]: loss value, mapped source, mapped target.
+        """
         m_source = self.model(source)
         m_target = self.model(target)
         directions = torch.randn((self.n_directions, m_source.shape[1]), requires_grad=False)
         directions /= torch.norm(directions, dim=-1, keepdim=True)
-        ordered_sources = torch.sort(directions @ m_source.T, dim=-1)[0]  # n_dir, n
-        ordered_targets = torch.sort(directions @ m_target.T, dim=-1)[0]  # n_dir, n
+        ordered_sources = torch.sort(directions @ m_source.T, dim=-1)[0]
+        ordered_targets = torch.sort(directions @ m_target.T, dim=-1)[0]
         return torch.sqrt(torch.sum(torch.abs(ordered_sources - ordered_targets) ** 2, dim=-1).mean()), m_source, m_target
 
     def forward(self, source, target):
+        """
+        Computes the augmented sliced Wasserstein loss using the learned mapping.
+        """
         return self._forward(source, target)[0]
