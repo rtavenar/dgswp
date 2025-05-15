@@ -3,7 +3,7 @@ import copy
 import torch
 from torch.distributions.normal import Normal
 
-def sample_noise_with_gradients(n_samples, shape):
+def sample_noise_with_gradients(n_samples, shape, normalize=False):
     """Samples a noise tensor from N(0,1) with its gradient.
 
     Args:
@@ -23,6 +23,9 @@ def sample_noise_with_gradients(n_samples, shape):
     sampler = Normal(0.0, 1.0)
     samples = sampler.sample(actual_shape)
     first_sample = torch.zeros(shape)
+    if normalize:
+        samples[:,:-1] /= torch.norm(samples[:,:-1], dim=-1, keepdim=True)**2
+
     all_samples = torch.cat((first_sample.unsqueeze(0), samples), dim=0)
     gradients = all_samples
 
@@ -95,12 +98,16 @@ class H_epsilon_module(torch.autograd.Function):
         to stash information for backward computation. You can cache arbitrary
         objects for use in the backward pass using the ctx.save_for_backward method.
         """
+        normalize = False
+        if str(module) == "BusemannMap()":  
+            normalize = True
+
         perturbed_modules = [copy.deepcopy(module) for _ in range(n_samples + 1)]  # list of N+1 models
         noise_gradients = []  # list of len(module.parameters()) noise gradients
         module_parameters = list(module.parameters())
         for i_param in range(len(module_parameters)):
             input_shape = module_parameters[i_param].shape  # [D, ] or multidim, whatever
-            additive_noise, noise_gradient = sample_noise_with_gradients(n_samples, input_shape)
+            additive_noise, noise_gradient = sample_noise_with_gradients(n_samples, input_shape, normalize)
             additive_noise = additive_noise.to(device)
             noise_gradient = noise_gradient.to(device)  # [N+1, D]
             for idx_m, m in enumerate(perturbed_modules):

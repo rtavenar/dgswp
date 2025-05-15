@@ -3,6 +3,10 @@ import numpy as np
 import torch
 import ot
 from abc import ABC, abstractmethod
+from lib_hyp.utils_hyperbolic import *
+from  geoopt.optim import RiemannianAdam, RiemannianSGD
+import geoopt
+import matplotlib.pyplot as plt
 
 from losses import H_eps, H_module
 
@@ -38,7 +42,7 @@ class GradientFlow(ABC):
         source = torch.tensor(source.clone().detach().numpy(), 
                               dtype=torch.float32, requires_grad=True)
         sources = [source.clone().detach().numpy()]
-        opt_source = Adam([source], lr=self.learning_rate_flow)
+        opt_source = SGD([source], lr=self.learning_rate_flow)
         for _ in range(self.n_iter_flow):
             self.inner_fit(source.detach(), target.detach())
             loss = self.forward(source, target)
@@ -52,7 +56,7 @@ class GradientFlow(ABC):
 
 class DifferentiableGeneralizedWassersteinPlanGradientFlow(GradientFlow):
     def __init__(self, learning_rate_flow, n_iter_flow, model, 
-                 n_iter_inner, learning_rate_inner=.01, epsilon=5e-2, n_samples_stein=10):
+                 n_iter_inner, learning_rate_inner=0.1, epsilon=5e-2, n_samples_stein=10):
         super().__init__(learning_rate_flow, n_iter_flow)
 
         self.epsilon = epsilon
@@ -69,6 +73,8 @@ class DifferentiableGeneralizedWassersteinPlanGradientFlow(GradientFlow):
         self.opt_model = Adam(self.model.parameters(), lr=self.learning_rate_inner)
     
     def inner_fit(self, source, target):
+        target = target.type(torch.float64) 
+        source = source.type(torch.float64)
         mem_loss_inner = []
         mem_params = []
         for _ in range(self.n_iter_inner):
@@ -77,10 +83,13 @@ class DifferentiableGeneralizedWassersteinPlanGradientFlow(GradientFlow):
                          epsilon=self.epsilon)
             mem_loss_inner.append(loss.item())
             mem_params.append(self.model.state_dict())
+            #print(mem_params[-1])
             loss.backward()
             self.opt_model.step()
             self.opt_model.zero_grad()
         self.model.load_state_dict(mem_params[np.argmin(mem_loss_inner)])
+        #plt.plot(mem_loss_inner)
+        #plt.show()
 
     def forward(self, source, target):
         return H_module(source, target, self.model)
@@ -133,6 +142,7 @@ class RandomSearchSWGGGradientFlow(GradientFlow):
         ordered_sources = source[torch.argsort(directions @ source.T, dim=-1)]  # n_dir, n, d
         ordered_targets = target[torch.argsort(directions @ target.T, dim=-1)]  # n_dir, n, d
         return torch.min(torch.mean(torch.sum(torch.abs(ordered_sources - ordered_targets) ** 2, dim=2), dim=1))
+
 
 class SWGGGradientFlow(GradientFlow):
     def __init__(self, learning_rate_flow, n_iter_flow, 
