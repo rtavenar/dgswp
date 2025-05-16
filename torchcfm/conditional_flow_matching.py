@@ -11,7 +11,7 @@ from typing import Union
 
 import torch
 
-from .optimal_transport import OTPlanSampler, SWGGSampler
+from .optimal_transport import OTPlanSampler, DGSWPSampler
 
 
 def pad_t_like_x(t, x):
@@ -312,12 +312,7 @@ class ExactOptimalTransportConditionalFlowMatcher(ConditionalFlowMatcher):
             return t, xt, ut, y0, y1
 
 
-class SWGGConditionalFlowMatcher(ConditionalFlowMatcher):
-    
-        # lr=FLAGS.swgg_lr,
-        # init_steps=FLAGS.swgg_init_steps,
-        # fine_tuning_steps=FLAGS.swgg_steps,
-        # model=swgg_model
+class DGSWPConditionalFlowMatcher(ConditionalFlowMatcher):
     def __init__(self, 
                  sigma: Union[float, int] = 0.0, 
                  lr: float = .1,
@@ -326,14 +321,18 @@ class SWGGConditionalFlowMatcher(ConditionalFlowMatcher):
                  model: Union["torch.nn.Sequential", None] = None,
                  device: str = "cpu"
                  ):
-        r"""Initialize the SWGGConditionalFlowMatcher class. It requires the hyper-parameter $\sigma$.
+        r"""Initialize the DGSWPConditionalFlowMatcher class. 
+        It requires the same hyper-parameters as ConditionalFlowMatcher, 
+        with the additional DGSWP-specific ones:
 
-        Parameters
-        ----------
-        sigma : Union[float, int]
+        lr (float): learning rate for training the DGSWP projection model
+        init_steps (int): number of training steps for the DGSWP projection model at the first iteration
+        fine_tuning_steps (int): number of training steps for the DGSWP projection model at each subsequent iteration
+        model (torch.nn.Sequential): DGSWP projection model
+        device (str): torch device, default: "cpu"
         """
         super().__init__(sigma)
-        self.ot_sampler = SWGGSampler(lr=lr, 
+        self.ot_sampler = DGSWPSampler(lr=lr, 
                                       init_steps=init_steps, 
                                       fine_tuning_steps=fine_tuning_steps,
                                       model=model, 

@@ -216,7 +216,16 @@ class OTPlanSampler:
         return to_return
 
 
-class SWGGSampler:
+class DGSWPSampler:
+    r"""Initialize the DGSWPSampler class. 
+        It requires the following DGSWP-specific hyper-parameters:
+
+        lr (float): learning rate for training the DGSWP projection model
+        init_steps (int): number of training steps for the DGSWP projection model at the first iteration
+        fine_tuning_steps (int): number of training steps for the DGSWP projection model at each subsequent iteration
+        model (torch.nn.Sequential): DGSWP projection model
+        device (str): torch device, default: "cpu"
+        """
     def __init__(self,
                  lr: float = .1,
                  init_steps: int = 1,
@@ -241,7 +250,7 @@ class SWGGSampler:
 
     def get_map(self, x0, x1):
         """Compute the Monge map (wrt squared Euclidean cost) between a source and a target
-        batch using SWGG.
+        batch using DGSWP.
 
         Parameters
         ----------
