@@ -21,7 +21,7 @@ To reproduce the figures from the paper, run the corresponding Python scripts. E
 | `fig_illus.py`    | Figure 1 |
 | `fig_h_g.py`    | Figure 2 |
 | `fig_var_red.py`    | Figure 3 |
-| `xp_gradient_flows.py` | Generates result files in `results_gf/` |
+| `xp_gradient_flows.py` | Generates result files in `results_gf/` (see below for details) |
 | `fig_gf.py` | Figure 4 from results stored in `results_gf/` |
 | `xp_gradient_flows_hyp.py` | Generates result files in `results_hyp/` **TODO** |
 | `fig_gf_hyp.py` | Figure 5 from results stored in `results_hyp/` |
