@@ -52,4 +52,4 @@ plt.xlim([df['Step'].min(), df['Step'].max()])
 plt.xticks(ticks=[100_000, 200_000, 300_000, 400_000], 
            labels=["100k", "200k", "300k", "400k"])
 plt.tight_layout()
-plt.savefig('fig_fid_plot_dopri5.pdf')
+plt.savefig('fig/fig_fid_plot_dopri5.pdf')
