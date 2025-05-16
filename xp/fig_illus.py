@@ -7,7 +7,7 @@ import matplotlib
 import ot
 import ot.plot
 
-from losses import dgswp
+from dgswp import dgswp
 
 
 def wass(x, y):
@@ -194,4 +194,4 @@ for x0i, x1i, col in zip(x0_plot_nn, x1_plot_nn, col1):
             linestyle="solid", alpha=.2,c="grey")
 plt.title("DGSWP (NN), $\\langle C_{\\mu\\nu}, \\pi^\\theta\\rangle$=" + f"{cost_nn:.2f}")
 plt.tight_layout()
-plt.savefig("fig_illus.pdf")
+plt.savefig("fig/fig_illus.pdf")

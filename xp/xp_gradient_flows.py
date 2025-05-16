@@ -6,19 +6,19 @@ import re
 import csv
 from tqdm import tqdm
 
-from datasets import data_gen_torch
-from gradient_flows import (DifferentiableGeneralizedWassersteinPlanGradientFlow, 
-                            SlicedWassersteinGradientFlow, 
-                            RandomSearchSWGGGradientFlow,
-                            SWGGGradientFlow,
-                            AugmentedSlicedWassersteinGradientFlow,
-                            MaxSlicedWassersteinGradientFlow)
+from dgswp import data_gen_torch
+from dgswp import (DifferentiableGeneralizedWassersteinPlanGradientFlow, 
+                   SlicedWassersteinGradientFlow, 
+                   RandomSearchSWGGGradientFlow,
+                   SWGGGradientFlow,
+                   AugmentedSlicedWassersteinGradientFlow,
+                   MaxSlicedWassersteinGradientFlow)
 
 class SingleHiddenLayerNet(nn.Module):
     def __init__(self, input_size, hidden_size, output_size):
         super(SingleHiddenLayerNet, self).__init__()
-        self.fc1 = nn.Linear(input_size, hidden_size)
-        self.fc2 = nn.Linear(hidden_size, output_size)
+        self.fc1 = nn.Linear(input_size, hidden_size, dtype=torch.float32)
+        self.fc2 = nn.Linear(hidden_size, output_size, dtype=torch.float32)
         self.relu = nn.ReLU()
         self.init()
 
@@ -40,7 +40,7 @@ class SingleLayerInjectiveNet(nn.Module):
         self.init()
 
     def init(self):
-        self.fc1 = nn.Sequential(nn.Linear(self.input_size, self.hidden_size))
+        self.fc1 = nn.Sequential(nn.Linear(self.input_size, self.hidden_size, dtype=torch.float32))
 
     def forward(self, x):
         h = self.fc1(x)
@@ -63,30 +63,30 @@ elif len(sys.argv) > 1 and re.match(r'gaussian_\d+d', sys.argv[1]):
 else:
     dataset_name = "swiss_roll"
 models = {
-    "SWD": SlicedWassersteinGradientFlow(learning_rate_flow=learning_rate_flow,
-                                          n_iter_flow=n_iter,
-                                          n_directions=n_directions),
-    "Max-SW": MaxSlicedWassersteinGradientFlow(learning_rate_flow=learning_rate_flow,
-                                          n_iter_flow=n_iter,
-                                          d=d,
-                                          n_iter_inner=n_directions,
-                                          learning_rate_inner=.01),
-    "min-SWGG (random search)": RandomSearchSWGGGradientFlow(learning_rate_flow=learning_rate_flow,
-                                          n_iter_flow=n_iter,
-                                          n_directions=n_directions),
-    "min-SWGG (optim)": SWGGGradientFlow(learning_rate_flow=learning_rate_flow,
-                                          n_iter_flow=n_iter,
-                                          d=d,
-                                          epsilon=0.1,
-                                          n_iter_inner=n_directions,
-                                          learning_rate_inner=.01),
-    "ASWD": AugmentedSlicedWassersteinGradientFlow(learning_rate_flow=learning_rate_flow,
-                                          n_iter_flow=n_iter,
-                                          model=SingleLayerInjectiveNet(input_size=d, hidden_size=d),
-                                          n_iter_inner=10,
-                                          n_directions=n_directions,
-                                          lambda_=.1,
-                                          learning_rate_inner=.01),
+    # "SWD": SlicedWassersteinGradientFlow(learning_rate_flow=learning_rate_flow,
+    #                                       n_iter_flow=n_iter,
+    #                                       n_directions=n_directions),
+    # "Max-SW": MaxSlicedWassersteinGradientFlow(learning_rate_flow=learning_rate_flow,
+    #                                       n_iter_flow=n_iter,
+    #                                       d=d,
+    #                                       n_iter_inner=n_directions,
+    #                                       learning_rate_inner=.01),
+    # "min-SWGG (random search)": RandomSearchSWGGGradientFlow(learning_rate_flow=learning_rate_flow,
+    #                                       n_iter_flow=n_iter,
+    #                                       n_directions=n_directions),
+    # "min-SWGG (optim)": SWGGGradientFlow(learning_rate_flow=learning_rate_flow,
+    #                                       n_iter_flow=n_iter,
+    #                                       d=d,
+    #                                       epsilon=0.1,
+    #                                       n_iter_inner=n_directions,
+    #                                       learning_rate_inner=.01),
+    # "ASWD": AugmentedSlicedWassersteinGradientFlow(learning_rate_flow=learning_rate_flow,
+    #                                       n_iter_flow=n_iter,
+    #                                       model=SingleLayerInjectiveNet(input_size=d, hidden_size=d),
+    #                                       n_iter_inner=10,
+    #                                       n_directions=n_directions,
+    #                                       lambda_=.1,
+    #                                       learning_rate_inner=.01),
     "DGSWP (linear)": DifferentiableGeneralizedWassersteinPlanGradientFlow(learning_rate_flow=learning_rate_flow,
                                           n_iter_flow=n_iter,
                                           model=nn.Linear(in_features=d, out_features=1),

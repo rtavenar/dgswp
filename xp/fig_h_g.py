@@ -70,4 +70,4 @@ handles1, labels1 = axes[1].get_legend_handles_labels()
 f.legend(handles0 + handles1, labels0 + labels1, 
          loc="upper center", bbox_to_anchor=(.52, 1.1), ncols=1, frameon=False)
 
-plt.savefig("fig_h_g.pdf", bbox_inches='tight')
+plt.savefig("fig/fig_h_g.pdf", bbox_inches='tight')

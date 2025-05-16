@@ -4,7 +4,7 @@ import torch
 import ot
 from abc import ABC, abstractmethod
 
-from losses import H_eps, H_module
+from . import H_eps, H_module
 
 def wass(x, y):
     """
@@ -129,8 +129,6 @@ class DifferentiableGeneralizedWassersteinPlanGradientFlow(GradientFlow):
         """
         Optimizes the projection model using the $h_\\varepsilon$ loss.
         """
-        target = target.type(torch.float64) 
-        source = source.type(torch.float64)
         mem_loss_inner = []
         mem_params = []
         for _ in range(self.n_iter_inner):
@@ -149,6 +147,69 @@ class DifferentiableGeneralizedWassersteinPlanGradientFlow(GradientFlow):
         Computes the non-perturbed loss $h$ using the learned projection model.
         """
         return H_module(source, target, self.model)
+
+
+class DifferentiableManifoldWassersteinPlanGradientFlow(DifferentiableGeneralizedWassersteinPlanGradientFlow):
+    def __init__(self, learning_rate_flow, n_iter_flow, model, manifold="Euclidean", n_iter_inner=50, learning_rate_inner=.1, epsilon=5e-2, n_samples_stein=10):
+        super().__init__(learning_rate_flow, n_iter_flow, model, n_iter_inner, learning_rate_inner, epsilon, n_samples_stein)
+
+        self.manifold = manifold
+        if self.manifold == "poincare" or self.manifold == "poincaré":
+            self.fundist = F_nn_poincare
+            self.fundist.__name__ = "F_nn_poincare"
+        else:
+            self.fundist = F_nn_sqeuc
+            self.fundist.__name__ = "F_nn_sqeuc"
+
+        self.opt_model = RiemannianSGD(self.model.parameters(), lr=self.learning_rate_inner) 
+
+    def fit(self, source, target):
+        losses = []
+        losses_wass = []
+
+        if self.manifold == "poincare":
+            manifold = geoopt.PoincareBall()
+        else:
+            print("only the Poincaré manifold is implemented: running on Euclidean one")
+            manifold = geoopt.Euclidean()
+        source = torch.tensor(source.clone().detach().numpy(), 
+                              dtype=source.dtype, requires_grad=True)
+        source = geoopt.ManifoldTensor(source.clone().detach().numpy(), manifold=manifold, requires_grad=True)
+        source = geoopt.ManifoldParameter(source, manifold=manifold)
+        opt_source = RiemannianSGD([source], lr=self.learning_rate_flow, momentum=0.9)#, stabilize=1) #stabilize to avoid numerical instabilities
+        
+        sources = [source.clone().detach().numpy()]
+
+        for _ in range(self.n_iter_flow):
+            self.inner_fit(source.detach(), target.detach()) #optimize the direction
+            opt_source.zero_grad()
+            loss = self.forward(source, target) 
+            #loss.backward() #retain_graph=True
+            #losses.append(loss.item())
+
+            prev_source = source.clone().detach()
+
+            #to have the same setting than Bonet et al.
+            grad_x0_swgg = torch.autograd.grad(loss, source)[0]
+            norm_x = torch.norm(source, dim=-1, keepdim=True)
+            z = (1-norm_x**2)**2/4
+            if grad_x0_swgg.isnan().any(): # to deal with numerical issues
+                with torch.no_grad():
+                    posNan = np.where(torch.isnan(grad_x0_swgg))[0]
+            source = exp_poincare(-self.learning_rate_flow * z * grad_x0_swgg, source)
+
+            #opt_source.step()
+            if source.isnan().any(): #Optimizing on manifolds is prone to numerical instabilities
+            #    #in that case, we do not update the source
+                #print("Nan's in source, not updating")
+                with torch.no_grad():
+                    posNan = np.where(torch.isnan(source))[0]
+                    source[np.where(torch.isnan(source))[0]] = prev_source[np.where(torch.isnan(source))[0]]
+
+            sources.append(source.clone().detach().numpy())
+            losses_wass.append(wass_poincare(source, target).detach().numpy())
+            opt_source.zero_grad()
+        return sources, losses, losses_wass
 
 class SlicedWassersteinGradientFlow(GradientFlow):
     """
@@ -207,7 +268,7 @@ class MaxSlicedWassersteinGradientFlow(GradientFlow):
 
 class RandomSearchSWGGGradientFlow(GradientFlow):
     """
-    Uses random directions and Greedy Gaussian slicing for gradient flow.
+    Uses SWGG and random directions for gradient flow.
     """
     def __init__(self, learning_rate_flow, n_iter_flow, n_directions):
         super().__init__(learning_rate_flow, n_iter_flow)

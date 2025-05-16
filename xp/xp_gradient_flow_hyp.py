@@ -3,9 +3,7 @@ from torch import nn
 import ot
 import argparse
 
-import torch.nn.functional as F
 import numpy as np
-import matplotlib.pyplot as plt
 
 from torch.utils.data import DataLoader
 from itertools import cycle
@@ -13,34 +11,14 @@ from tqdm.auto import trange
 from copy import deepcopy
 
 
-from lib_hyp.utils_hyperbolic import *
-from lib_hyp.distributions import sampleWrappedNormal
-from lib_hyp.hsw import hyper_sliced_wasserstein
-from lib_hyp.sw import sliced_wasserstein
-from lib_hyp.hhsw import horo_hyper_sliced_wasserstein_poincare
+from lib_hyp import sampleWrappedNormal, hyper_sliced_wasserstein, sliced_wasserstein, horo_hyper_sliced_wasserstein_poincare, BusemannMap
 
-from datasets import data_gen_torch
-from gradient_flows import (GeneralizedSWGGGradientFlow, 
-                            GeneralizedSWGGGradientFlow_busemann)
+from dgswp import GeneralizedSWGGGradientFlow
 
 #most of the code is taken from the original code of the paper of Bonet, 2023
 #https://github.com/clbonet/Hyperbolic_Sliced-Wasserstein_via_Geodesic_and_Horospherical_Projections
     
-class BusemannMap(nn.Module):
-    def __init__(self, input_size):
-        super().__init__()
-        init_dir = torch.randn(size=(1,input_size)) #no bias here
-        self.direction = torch.nn.Parameter(init_dir/(torch.norm(init_dir, dim=-1)**2), requires_grad=True)
-        
-    def busemann_poincare(self, x): #could be performed on Lorentz space as well
-        with torch.no_grad():
-            self.direction.div_(torch.norm(self.direction, dim=-1, keepdim=True)**2)
-        return torch.log(torch.norm(self.direction[None]-x[:,None], dim=-1)**2 /
-                         (1-torch.norm(x,dim=-1,keepdim=True)**2))
 
-    def forward(self, x):
-        x = self.busemann_poincare(x)
-        return x
     
 
 

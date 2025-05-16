@@ -7,7 +7,7 @@ from tqdm import tqdm
 import matplotlib
 import ot
 
-from losses import dgswp
+from dgswp import dgswp
 
 
 def wass(x, y):
@@ -167,4 +167,4 @@ plt.legend()
 plt.xlim([0, min_length])
 plt.grid(True)
 plt.tight_layout()
-plt.savefig("fig_var_red.pdf")
+plt.savefig("fig/fig_var_red.pdf")

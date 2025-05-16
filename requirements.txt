@@ -2,3 +2,4 @@ numpy
 torch
 pot
 scikit-learn
+tqdm

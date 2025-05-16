@@ -3,8 +3,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 from matplotlib.gridspec import GridSpec
 
-from datasets import data_gen
-
+from dgswp import data_gen
 
 # === Setup ===
 palette = {
@@ -104,4 +103,4 @@ handles, labels = list_axes[0].get_legend_handles_labels()
 fig.legend(handles, labels, loc="upper center", ncols=3, frameon=False)
 
 plt.tight_layout(rect=[0, 0, 1, 0.85])  # Leave space for legend
-plt.savefig("fig_gf.pdf", bbox_inches='tight')
+plt.savefig("fig/fig_gf.pdf", bbox_inches='tight')
