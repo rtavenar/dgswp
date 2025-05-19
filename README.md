@@ -31,8 +31,8 @@ model = nn.Linear(in_features=2, out_features=1)  # Use any `nn.Sequential` mode
 opt = SGD(model.parameters())
 
 dgswp(x, y, model, opt)
-print(H_module(x, y, model))  # Outputs $h(\theta)$ 
-                              # where $\theta$ is the set of 
+print(H_module(x, y, model))  # Outputs h(θ) 
+                              # where θ is the set of 
                               # all model parameters
 ```
 
