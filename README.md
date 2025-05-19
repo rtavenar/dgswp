@@ -14,7 +14,29 @@ pip install -r requirements.txt
 
 The CFM experiment imply additional requirements: see `torchcfm`'s GitHub repository for that.
 
-## Figure Generation
+## Example code
+
+The main function in this code is the `dgswp` one from the `dgswp` package.
+It runs our algorithm by taking as input two datasets `x` and `y`, a projection model to be fitted and its optimizer (hyper-parameters can be passed, but default values work pretty well).
+At the end of execution, the cost $\langle C, \pi(\theta)\rangle$ can be computed using the `H_module` function from the `dgswp` package.
+
+```python
+import torch.nn as nn
+from torch.optim import SGD
+
+from dgswp import dgswp, H_module, data_gen_torch
+
+x, y = data_gen_torch(n_samples_per_distrib=50, d=2, name="two_moons")
+model = nn.Linear(in_features=2, out_features=1)  # Use any `nn.Sequential` model here
+opt = SGD(model.parameters())
+
+dgswp(x, y, model, opt)
+print(H_module(x, y, model))  # Outputs $\langle C, \pi(\theta)\rangle$ 
+                              # where $\theta$ is the set of 
+                              # all model parameters
+```
+
+## Reproducing the paper's results
 
 To reproduce the figures from the paper, run the corresponding Python scripts. Each script generates one figure:
 
