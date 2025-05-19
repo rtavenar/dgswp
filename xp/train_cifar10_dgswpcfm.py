@@ -2,8 +2,7 @@
 
 # Authors: Kilian Fatras
 #          Alexander Tong
-#          Laetitia Chapel
-#          Romain Tavenard
+
 
 import os
 
