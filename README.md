@@ -12,7 +12,7 @@ Install the dependencies with:
 pip install -r requirements.txt
 ```
 
-Additional requirements are necessary for the CFM experiment: see `torchcfm`'s GitHub repository for that.
+The CFM experiment imply additional requirements: see `torchcfm`'s GitHub repository for that.
 
 ## Figure Generation
 
@@ -25,7 +25,7 @@ To reproduce the figures from the paper, run the corresponding Python scripts. E
 | `xp/fig_var_red.py`    | Figure 3 |
 | `xp/xp_gradient_flows.py` | Generates result files in `results_gf/` (see below for details) |
 | `xp/fig_gf.py` | Figure 4 from results stored in `results_gf/` |
-| `xp/xp_gradient_flows_hyp.py` | Generates result files in `results_hyp/` **TODO** |
+| `xp/xp_gradient_flows_hyp.py` | Generates result files in `results_hyp/` (see below for details) |
 | `xp/fig_gf_hyp.py` | Figure 5 from results stored in `results_hyp/` |
 | `xp/train_cifar10_cfm.py` | Trains baseline models for the CIFAR10 CFM experiment |
 | `xp/train_cifar10_dgswpcfm.py` | Trains our model for the CIFAR10 CFM experiment |
@@ -47,3 +47,16 @@ PYTHONPATH=. python xp/xp_gradient_flows.py two_moons
 PYTHONPATH=. python xp/xp_gradient_flows.py gaussian
 PYTHONPATH=. python xp/xp_gradient_flows.py gaussian_500d
 ```
+
+To run the hyperbolic gradient flow experiment on both settings for Figure 5, you will need:
+
+```bash
+PYTHONPATH=. python xp/xp_gradient_flow_hyp.py --target center
+PYTHONPATH=. python xp/xp_gradient_flow_hyp.py --target border
+```
+
+## External software
+
+The `torchcfm` subpackage included here is a slightly modified version of code available at `https://github.com/atong01/conditional-flow-matching` that includes DGSWP as a way to prepare minibatches.
+
+Similarly, the `lib_hyp` subpackage is an adaptation of the `lib` folder from `https://github.com/clbonet/Hyperbolic_Sliced-Wasserstein_via_Geodesic_and_Horospherical_Projections`.

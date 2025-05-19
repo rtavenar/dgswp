@@ -6,6 +6,16 @@ from abc import ABC, abstractmethod
 
 from . import H_eps, H_module
 
+# For hyperbolic manifolds
+try:
+    from lib_hyp import dist_poincare2, minkowski_ip, poincare_to_lorentz
+    from geoopt.optim import RiemannianAdam, RiemannianSGD
+    import geoopt
+    poincare_available = True
+except ImportError:
+    poincare_available = False
+
+
 def wass(x, y):
     """
     Computes the squared Wasserstein distance between two point clouds x and y
@@ -22,6 +32,41 @@ def wass(x, y):
     a = torch.ones(x.shape[0])/x.shape[0]
     b = torch.ones(y.shape[0])/y.shape[0]
     return ot.emd2(a, b, dists)
+
+if poincare_available:
+    def wass_poincare(x, y):
+        """
+        Computes the squared Wasserstein distance between two point clouds x and y
+        using the Earth Mover's Distance (EMD) implementation from the POT library.
+        Here, the inner distance is the one implemented by `dist_poincare2`.
+
+        Args:
+            x (Tensor): Source samples of shape (n, d).
+            y (Tensor): Target samples of shape (m, d).
+
+        Returns:
+            float: The squared Wasserstein distance between x and y.
+        """
+        dists = dist_poincare2(x, y)
+        a = torch.ones(x.shape[0])/x.shape[0]
+        b = torch.ones(y.shape[0])/y.shape[0]
+        return ot.emd2(a, b, dists)
+
+    def H_module_poincare(x, y, model, p=2):
+        """Computes the model-based variant our $h$ function (cf. paper).
+
+        Args:
+            x (torch.Tensor): First distribution sample.
+            y (torch.Tensor): Second distribution sample.
+            model (nn.Module): A model that defines the projection.
+            p (int, optional): Power used in the distance calculation. Defaults to 2.
+
+        Returns:
+            torch.Tensor: Computed distance.
+        """
+        pos_x_1d = torch.argsort(model(x).flatten())
+        pos_y_1d = torch.argsort(model(y).flatten())
+        return torch.mean(torch.arccosh(torch.clamp(-minkowski_ip(poincare_to_lorentz(x[pos_x_1d]), poincare_to_lorentz(y[pos_y_1d])), min=1+1e-15))**2)
 
 class GradientFlow(ABC):
     """
@@ -149,67 +194,75 @@ class DifferentiableGeneralizedWassersteinPlanGradientFlow(GradientFlow):
         return H_module(source, target, self.model)
 
 
-class DifferentiableManifoldWassersteinPlanGradientFlow(DifferentiableGeneralizedWassersteinPlanGradientFlow):
-    def __init__(self, learning_rate_flow, n_iter_flow, model, manifold="Euclidean", n_iter_inner=50, learning_rate_inner=.1, epsilon=5e-2, n_samples_stein=10):
-        super().__init__(learning_rate_flow, n_iter_flow, model, n_iter_inner, learning_rate_inner, epsilon, n_samples_stein)
+if poincare_available:
+    class PoincareDGSWPGradientFlow(DifferentiableGeneralizedWassersteinPlanGradientFlow):
+        def __init__(self, learning_rate_flow, n_iter_flow, model, n_iter_inner=50, learning_rate_inner=.01, epsilon=5e0, n_samples_stein=10):
+            super().__init__(learning_rate_flow, n_iter_flow, model, n_iter_inner, learning_rate_inner, epsilon, n_samples_stein)
 
-        self.manifold = manifold
-        if self.manifold == "poincare" or self.manifold == "poincaré":
-            self.fundist = F_nn_poincare
-            self.fundist.__name__ = "F_nn_poincare"
-        else:
-            self.fundist = F_nn_sqeuc
-            self.fundist.__name__ = "F_nn_sqeuc"
-
-        self.opt_model = RiemannianSGD(self.model.parameters(), lr=self.learning_rate_inner) 
-
-    def fit(self, source, target):
-        losses = []
-        losses_wass = []
-
-        if self.manifold == "poincare":
-            manifold = geoopt.PoincareBall()
-        else:
-            print("only the Poincaré manifold is implemented: running on Euclidean one")
-            manifold = geoopt.Euclidean()
-        source = torch.tensor(source.clone().detach().numpy(), 
-                              dtype=source.dtype, requires_grad=True)
-        source = geoopt.ManifoldTensor(source.clone().detach().numpy(), manifold=manifold, requires_grad=True)
-        source = geoopt.ManifoldParameter(source, manifold=manifold)
-        opt_source = RiemannianSGD([source], lr=self.learning_rate_flow, momentum=0.9)#, stabilize=1) #stabilize to avoid numerical instabilities
+            self.opt_model = RiemannianSGD([self.model.manifold_paramter()], lr=self.learning_rate_inner) #should belong to the Poincaré ball
+    
+        def init(self):
+            """
+            Initializes the model optimizer and optionally the model.
+            """
+            if hasattr(self.model, "init"):
+                self.model.init()
+            self.opt_model = RiemannianSGD([self.model.manifold_paramter()], lr=self.learning_rate_inner)
         
-        sources = [source.clone().detach().numpy()]
+        def inner_fit(self, source, target):
+            """
+            Optimizes the projection model using the $h_\\varepsilon$ loss.
+            """
+            mem_loss_inner = []
+            mem_params = []
+            for _ in range(self.n_iter_inner):
+                loss = H_eps(self.model, source, target, 
+                            fun=H_module_poincare, n_samples=self.n_samples, 
+                            epsilon=self.epsilon)
+                mem_loss_inner.append(loss.item())
+                mem_params.append(self.model.state_dict())
+                loss.backward()
+                self.opt_model.step()
+                self.opt_model.zero_grad()
+            self.model.load_state_dict(mem_params[np.argmin(mem_loss_inner)])
 
-        for _ in range(self.n_iter_flow):
-            self.inner_fit(source.detach(), target.detach()) #optimize the direction
-            opt_source.zero_grad()
-            loss = self.forward(source, target) 
-            #loss.backward() #retain_graph=True
-            #losses.append(loss.item())
+        def fit(self, source, target):
+            losses = []
+            losses_wass = []
 
-            prev_source = source.clone().detach()
+            manifold = geoopt.PoincareBall()
+            source = geoopt.ManifoldTensor(source.clone().detach().numpy(), manifold=manifold, requires_grad=True)
+            source = geoopt.ManifoldParameter(source, manifold=manifold)
+            
+            opt_source = RiemannianSGD([source], lr=self.learning_rate_flow, stabilize=1) #stabilize to avoid numerical instabilities
 
-            #to have the same setting than Bonet et al.
-            grad_x0_swgg = torch.autograd.grad(loss, source)[0]
-            norm_x = torch.norm(source, dim=-1, keepdim=True)
-            z = (1-norm_x**2)**2/4
-            if grad_x0_swgg.isnan().any(): # to deal with numerical issues
-                with torch.no_grad():
-                    posNan = np.where(torch.isnan(grad_x0_swgg))[0]
-            source = exp_poincare(-self.learning_rate_flow * z * grad_x0_swgg, source)
+            sources = [source.clone().detach().numpy()]
 
-            #opt_source.step()
-            if source.isnan().any(): #Optimizing on manifolds is prone to numerical instabilities
-            #    #in that case, we do not update the source
-                #print("Nan's in source, not updating")
-                with torch.no_grad():
-                    posNan = np.where(torch.isnan(source))[0]
-                    source[np.where(torch.isnan(source))[0]] = prev_source[np.where(torch.isnan(source))[0]]
+            for _ in range(self.n_iter_flow):
+                self.inner_fit(source.detach(), target.detach()) #optimize the direction
+                opt_source.zero_grad()
+                loss = self.forward(source, target) 
+                loss.backward() 
+                losses.append(loss.item())
 
-            sources.append(source.clone().detach().numpy())
-            losses_wass.append(wass_poincare(source, target).detach().numpy())
-            opt_source.zero_grad()
-        return sources, losses, losses_wass
+                prev_source = source.clone().detach()
+
+                opt_source.step()
+                if source.isnan().any(): #Optimizing on manifolds is prone to numerical instabilities
+                    #in that case, we do not update the source
+                    with torch.no_grad():
+                        source[np.where(torch.isnan(source))[0]] = prev_source[np.where(torch.isnan(source))[0]]
+
+                sources.append(source.clone().detach().numpy())
+                losses_wass.append(wass_poincare(source, target).detach().numpy())
+            return sources, losses, losses_wass
+
+        def forward(self, source, target):
+            """
+            Computes the non-perturbed loss $h$ using the learned projection model.
+            """
+            return H_module_poincare(source, target, self.model)
+
 
 class SlicedWassersteinGradientFlow(GradientFlow):
     """

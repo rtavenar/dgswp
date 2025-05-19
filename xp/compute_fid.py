@@ -3,12 +3,10 @@
 # Authors: Kilian Fatras
 #          Alexander Tong
 
-import os
 import sys
 
-import matplotlib.pyplot as plt
 import torch
-from absl import app, flags
+from absl import flags
 from cleanfid import fid
 from torchdiffeq import odeint
 from torchdyn.core import NeuralODE

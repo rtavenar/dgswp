@@ -3,3 +3,4 @@ torch
 pot
 scikit-learn
 tqdm
+geoopt  # For hyperbolic Gradient FLows

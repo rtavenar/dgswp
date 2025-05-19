@@ -1,6 +1,6 @@
 from .losses import dgswp, H_eps, H_module
 from .gradient_flows import (DifferentiableGeneralizedWassersteinPlanGradientFlow,
-                             DifferentiableManifoldWassersteinPlanGradientFlow,
+                             PoincareDGSWPGradientFlow,
                              SlicedWassersteinGradientFlow,
                              MaxSlicedWassersteinGradientFlow,
                              RandomSearchSWGGGradientFlow,
