@@ -24,13 +24,15 @@ At the end of execution, the cost $h(\theta) = \langle C, \pi(\theta)\rangle$ ca
 import torch.nn as nn
 from torch.optim import SGD
 
-from dgswp import dgswp, H_module, data_gen_torch
+from dgswp import dgswp, H_module, get_dgswp_plan, data_gen_torch
 
 x, y = data_gen_torch(n_samples_per_distrib=50, d=2, name="two_moons")
 model = nn.Linear(in_features=2, out_features=1)  # Use any `nn.Sequential` model here
 opt = SGD(model.parameters())
 
 dgswp(x, y, model, opt)
+P = get_dgswp_plan(x, y, model)  # Builds the corresponding 
+                                 # transportation plan π(θ)
 print(H_module(x, y, model))  # Outputs h(θ) 
                               # where θ is the set of 
                               # all model parameters

@@ -60,6 +60,27 @@ def H_module(x, y, model, p=2):
     pos_y_1d = torch.argsort(model(y).flatten())
     return torch.mean(torch.sum(torch.abs(x[pos_x_1d] - y[pos_y_1d]) ** p, dim=-1), dim=0)
 
+
+def get_dgswp_plan(x, y, model):
+    """
+    Constructs a DGSWP transportation plan from 
+    two distribution samples and a projection model.
+
+    Args:
+        x (torch.Tensor): First distribution sample.
+        y (torch.Tensor): Second distribution sample.
+        model (nn.Module): A model that defines the projection.
+
+    Returns:
+        torch.Tensor: Transportation plan P.
+    """
+    pos_x_1d = torch.argsort(model(x).flatten())
+    pos_y_1d = torch.argsort(model(y).flatten())
+    n = pos_x_1d.shape[0]
+    P = torch.zeros((n, n), dtype=torch.float32, device=x.device)
+    P[pos_x_1d, pos_y_1d] = 1.0 / n
+    return P
+
 def H_batch(thetas, x, y, fun=None):
     """Computes distances for a batch of projection directions or models.
 

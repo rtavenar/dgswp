@@ -1,4 +1,4 @@
-from .losses import dgswp, H_eps, H_module
+from .losses import dgswp, H_eps, H_module, get_dgswp_plan
 from .gradient_flows import (DifferentiableGeneralizedWassersteinPlanGradientFlow,
                              PoincareDGSWPGradientFlow,
                              SlicedWassersteinGradientFlow,
