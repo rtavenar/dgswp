@@ -17,7 +17,7 @@ The CFM experiment imply additional requirements: see `torchcfm`'s GitHub reposi
 ## Example code
 
 The main function in this code is the `dgswp` one from the `dgswp` package.
-It runs our algorithm by taking as input two datasets `x` and `y`, a projection model to be fitted and its optimizer (hyper-parameters can be passed, but default values work pretty well).
+It runs our algorithm by taking as input two datasets `x` and `y`, a projection model to be fitted and its optimizer (hyper-parameters can be passed to `dgswp`, but default values work pretty well).
 At the end of execution, the cost $\langle C, \pi(\theta)\rangle$ can be computed using the `H_module` function from the `dgswp` package.
 
 ```python
