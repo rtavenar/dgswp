@@ -1,7 +1,2 @@
 __pycache__/
-models_cfm/
-gf_*.pdf
-gf_*.svg
-timings_*.pdf
-animation.gif
-cfm.pdf
+fig_*.pdf

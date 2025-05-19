@@ -1,4 +1,5 @@
 numpy
-numba
-kneed
+torch
 pot
+scikit-learn
+tqdm
