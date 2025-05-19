@@ -14,13 +14,23 @@ from torch import Tensor
 
 from scipy.stats import gaussian_kde
 
-from lib_hyp import (sampleWrappedNormal,
-                     lorentz_to_poincare,
-                    #  expand_proj_dims,
-                    #  clamp,
-                    #  max_clamp_norm,
-                    #  exp_map_mu0
-                     )
+from lib_hyp import sampleWrappedNormal, lorentz_to_poincare
+
+
+
+params = {"text.usetex": True,
+      "font.family": "serif",               # Match LaTeX default serif font (Computer Modern)
+      "font.serif": ["Computer Modern Roman"],
+      "text.latex.preamble": r"\usepackage{amsmath}",
+      'legend.fontsize': 13,
+      'axes.labelsize': 13,
+      'axes.titlesize': 13,
+      'mathtext.fontset': 'cm',
+      'mathtext.rm': 'serif', 
+      "ytick.left" : False,
+      'lines.linewidth': 2.
+      }
+matplotlib.rcParams.update(params)
 
 
 eps = 1e-7
@@ -70,37 +80,15 @@ def exp_map_mu0(x: Tensor, radius: Tensor) -> Tensor:
     assert torch.isfinite(ret).all()
     return ret
 
-
-
-params = {"text.usetex": True,
-      "font.family": "serif",               # Match LaTeX default serif font (Computer Modern)
-      "font.serif": ["Computer Modern Roman"],
-      "text.latex.preamble": r"\usepackage{amsmath}",
-      'legend.fontsize': 13,
-      'axes.labelsize': 13,
-      'axes.titlesize': 13,
-      'mathtext.fontset': 'cm',
-      'mathtext.rm': 'serif', 
-      "ytick.left" : False,
-      'lines.linewidth': 2.
-      }
-matplotlib.rcParams.update(params)
-
-
 # Helper function to do the plotting
-def plot_density(xy_poincare, probs, mu=None, ax=None):
+def plot_density(xy_poincare, probs, ax=None):
     axis_lim = 1.01
 
     x = xy_poincare[:, 0].view(-1, 100).detach().cpu()
     y = xy_poincare[:, 1].view(-1, 100).detach().cpu()
     z = probs.view(-1, 100).detach().cpu()
-    # Define points within circle
-    if mu is not None:
-        mu = mu.cpu().numpy()
-        plt.plot(mu[:, 0], mu[:, 1], 'b+')
 
     ax.contourf(x, y, z, 100, antialiased=False, cmap='Oranges')
-    
     ax.axis('off')
 
     # draw some fancy circle

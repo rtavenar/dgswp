@@ -139,24 +139,13 @@ for k in range(n_repeat):
         a = torch.ones((n,), device=device)/n
         b = torch.ones((n,), device=device)/n
 
-        if torch.any(torch.isnan(x_hhsw)):
-            L_hhsw[k, e] = np.inf
-        else:
-            M_hhsw = torch.arccosh(torch.clamp(-minkowski_ip2(X_target, poincare_to_lorentz(x_hhsw)), min=1+1e-15))**2
-            w_hhsw = ot.emd2(a, b, M_hhsw)
-            L_hhsw[k, e] = w_hhsw.item()
-        
-        if torch.any(torch.isnan(x_swp)):
-            L_swp[k, e] = np.inf
-        else:
-            M_swp = torch.arccosh(torch.clamp(-minkowski_ip2(X_target, poincare_to_lorentz(x_swp)), min=1+1e-15))**2
-            w_swp = ot.emd2(a, b, M_swp)
-            L_swp[k, e] = w_swp.item()
-
-        M_dgswp = torch.arccosh(torch.clamp(-minkowski_ip2(X_target, poincare_to_lorentz(torch.tensor(x_dgswp[e]))), min=1+1e-15))**2
-        w_dgswp = ot.emd2(a, b, M_dgswp)
-        L_dgswp[k, e] = w_dgswp.item()
-
+        for x, L in zip([x_hhsw, x_swp, x_dgswp],
+                        [L_hhsw, L_swp, L_dgswp]):
+            if torch.any(torch.isnan(x)):
+                L[k, e] = np.inf
+            else:
+                M = torch.arccosh(torch.clamp(-minkowski_ip2(X_target, poincare_to_lorentz(x)), min=1+1e-15))**2
+                L[k, e] = ot.emd2(a, b, M).item()
 
 np.savetxt("results_hyp/hhsw_loss_wnd_"+args.target, L_hhsw)
 np.savetxt("results_hyp/swp_loss_wnd_"+args.target, L_swp)
