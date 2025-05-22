@@ -89,7 +89,6 @@ model_dgswp = PoincareDGSWPGradientFlow(learning_rate_flow=lr_dgswp,
                                         n_iter_inner=num_projections)    
 
 for k in tqdm(range(n_repeat)):
-    # print("-----------------try #",k)
     torch.manual_seed(k)
     np.random.seed(k)
 
