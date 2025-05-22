@@ -8,6 +8,7 @@ import numpy as np
 from torch.utils.data import DataLoader
 from itertools import cycle
 from copy import deepcopy
+from tqdm import tqdm
 
 import geoopt
 
@@ -87,8 +88,8 @@ model_dgswp = PoincareDGSWPGradientFlow(learning_rate_flow=lr_dgswp,
                                         model=BusemannMap(input_size=2),
                                         n_iter_inner=num_projections)    
 
-for k in range(n_repeat):
-    print("-----------------try #",k)
+for k in tqdm(range(n_repeat)):
+    # print("-----------------try #",k)
     torch.manual_seed(k)
     np.random.seed(k)
 
@@ -139,7 +140,7 @@ for k in range(n_repeat):
         a = torch.ones((n,), device=device)/n
         b = torch.ones((n,), device=device)/n
 
-        for x, L in zip([x_hhsw, x_swp, x_dgswp],
+        for x, L in zip([x_hhsw, x_swp, x_dgswp[e]],
                         [L_hhsw, L_swp, L_dgswp]):
             if torch.any(torch.isnan(x)):
                 L[k, e] = np.inf

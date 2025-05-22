@@ -236,7 +236,7 @@ if poincare_available:
             
             opt_source = RiemannianSGD([source], lr=self.learning_rate_flow, stabilize=1) #stabilize to avoid numerical instabilities
 
-            sources = [source.clone().detach().numpy()]
+            sources = [source.clone().detach()]
 
             for _ in range(self.n_iter_flow):
                 self.inner_fit(source.detach(), target.detach()) #optimize the direction
@@ -253,7 +253,7 @@ if poincare_available:
                     with torch.no_grad():
                         source[np.where(torch.isnan(source))[0]] = prev_source[np.where(torch.isnan(source))[0]]
 
-                sources.append(source.clone().detach().numpy())
+                sources.append(source.clone().detach())
                 losses_wass.append(wass_poincare(source, target).detach().numpy())
             return sources, losses, losses_wass
 
