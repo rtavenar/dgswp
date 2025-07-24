@@ -85,10 +85,9 @@ def straightness(batch_size, num_gen, integration_method, integration_steps, tol
                 traj = odeint(
                     new_net, x, t_span, rtol=tol, atol=tol, method=integration_method
                 )
-        # traj = torch.stack((x, traj), dim=0) # (integration_steps + 1, batch_size, 3, 32, 32)
-        displacements = traj[1:] - traj[:-1] # (integration_steps - 1, batch_size, 3, 32, 32)
-        delta_t = t_span[1:] - t_span[:-1]  # (integration_steps - 1, )
-        velocities = displacements / delta_t.view(-1, 1, 1, 1, 1)  # (integration_steps - 1, batch_size, 3, 32, 32)
+        displacements = traj[1:] - traj[:-1] # (integration_steps, batch_size, 3, 32, 32)
+        delta_t = t_span[1:] - t_span[:-1]  # (integration_steps, )
+        velocities = displacements / delta_t.view(-1, 1, 1, 1, 1)  # (integration_steps, batch_size, 3, 32, 32)
         x1_minus_x0 = traj[-1] - traj[0] # (batch_size, 3, 32, 32)
         sq_norm = torch.linalg.norm(
             x1_minus_x0.view(1, batch_size, -1) - velocities.view(integration_steps, batch_size, -1), 
