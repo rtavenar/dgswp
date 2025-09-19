@@ -7,7 +7,7 @@ import numpy as np
 import ot as pot
 import torch
 
-from ..dgswp import dgswp
+from dgswp import dgswp
 
 
 class OTPlanSampler:

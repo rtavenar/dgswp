@@ -10,6 +10,7 @@ from absl import app, flags
 from torchvision import datasets, transforms
 from tqdm import trange
 import time
+import copy
 
 from torchcfm.conditional_flow_matching import (
     ConditionalFlowMatcher,
@@ -49,8 +50,8 @@ flags.DEFINE_integer(
 
 if torch.cuda.is_available():
     device = torch.device("cuda")
-elif torch.mps.is_available():
-    device = torch.device("mps")
+# elif torch.mps.is_available():
+#     device = torch.device("mps")
 else:
     device = torch.device("cpu")
 
@@ -105,7 +106,7 @@ def train(argv):
         device
     )  # new dropout + bs of 128
 
-    # ema_model = copy.deepcopy(net_model)
+    ema_model = copy.deepcopy(net_model)
     optim = torch.optim.Adam(net_model.parameters(), lr=FLAGS.lr)
     sched = torch.optim.lr_scheduler.LambdaLR(optim, lr_lambda=warmup_lr)
     if FLAGS.parallel:
