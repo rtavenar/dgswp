@@ -1,6 +1,17 @@
 # Differentiable Generalized Sliced Wasserstein Plans
 
-This repository accompanies our paper: **"Differentiable Generalized Sliced Wasserstein Plans"** (anonymous submission).
+This repository accompanies our paper: **"Differentiable Generalized Sliced Wasserstein Plans"**:
+
+```bibtex
+@inproceedings{
+    chapel2025differentiable,
+    title={Differentiable Generalized Sliced Wasserstein Plans},
+    author={Chapel, Laetitia and Tavenard, Romain and Vaiter, Samuel},
+    booktitle={NeurIPS},
+    year={2025},
+    url={https://openreview.net/forum?id=hKKbtN4cp9}
+}
+```
 
 It contains the code necessary to reproduce the figures presented in the paper. Each figure is generated using a script following the `fig_*.py` naming convention.
 
