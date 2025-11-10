@@ -1,6 +1,6 @@
 # Differentiable Generalized Sliced Wasserstein Plans
 
-This repository accompanies our paper **"Differentiable Generalized Sliced Wasserstein Plans"**:
+This repository accompanies our paper **"Differentiable Generalized Sliced Wasserstein Plans"** ([OpenReview link](https://openreview.net/forum?id=hKKbtN4cp9)):
 
 ```bibtex
 @inproceedings{
